@@ -77,10 +77,12 @@ export async function duplicateProduct(productId: string) {
   >`SELECT id,slug,name,description,category_id,brand_id,image_url FROM products WHERE id=${id}`;
   if (!source) throw new Error("Product no longer exists.");
   const suffix = Date.now().toString(36).slice(-5);
+  const cloneSlug = `${source.slug}-copy-${suffix}`;
+  const cloneSku = `TT-PROD-${cloneSlug.toUpperCase()}`;
   const clone = await sql.begin(async (tx) => {
     const [created] = await tx<
       { id: string }[]
-    >`INSERT INTO products (slug,name,description,category_id,brand_id,image_url,active) VALUES (${source.slug + "-copy-" + suffix},${source.name + " (copy)"},${source.description},${source.category_id},${source.brand_id},${source.image_url},false) RETURNING id`;
+    >`INSERT INTO products (slug,sku,name,description,category_id,brand_id,image_url,active) VALUES (${cloneSlug},${cloneSku},${source.name + " (copy)"},${source.description},${source.category_id},${source.brand_id},${source.image_url},false) RETURNING id`;
     const variants = await tx<
       {
         sku: string;

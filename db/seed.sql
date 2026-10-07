@@ -89,15 +89,17 @@ WITH product_seed(slug, name, category_slug, brand_slug, image_url, abv, active,
   ('smirnoff-ice', 'Smirnoff Ice', 'beer', 'smirnoff', NULL, NULL, true, false),
   ('lemonade', 'Lemonade', 'mixers', NULL, '/images/products/lemonade.jpg', 0.0, true, false),
   ('coca-cola-1l', 'Coca-Cola 1 Litre', 'mixers', 'coca-cola', '/images/products/coca-cola-1l.jpg', 0.0, true, false),
-  ('shisha', 'Shisha', 'mixers', NULL, NULL, NULL, true, false)
+  ('shisha', 'Shisha', 'mixers', NULL, NULL, NULL, true, false),
+  ('test', 'Test', 'mixers', NULL, NULL, 0.0, true, false)
 )
-INSERT INTO products (slug, name, category_id, brand_id, image_url, alcohol_by_volume, active, featured, age_restricted)
-SELECT ps.slug, ps.name, c.id, b.id, ps.image_url, ps.abv, ps.active, ps.featured,
+INSERT INTO products (slug, sku, name, category_id, brand_id, image_url, alcohol_by_volume, active, featured, age_restricted)
+SELECT ps.slug, 'TT-PROD-' || upper(regexp_replace(ps.slug, '[^a-zA-Z0-9]+', '-', 'g')), ps.name, c.id, b.id, ps.image_url, ps.abv, ps.active, ps.featured,
        CASE WHEN ps.category_slug = 'mixers' THEN false ELSE true END
 FROM product_seed ps
 JOIN categories c ON c.slug = ps.category_slug
 LEFT JOIN brands b ON b.slug = ps.brand_slug
 ON CONFLICT (slug) DO UPDATE SET
+  sku = EXCLUDED.sku,
   name = EXCLUDED.name,
   category_id = EXCLUDED.category_id,
   brand_id = EXCLUDED.brand_id,
@@ -139,7 +141,10 @@ WITH variant_seed(product_slug, sku, label, size_label, price_minor, cost_price_
   ('smirnoff-ice','SMIRNOFF-ICE-330ML','330 ml','330 ml',300,185,true,true),
   ('lemonade','LEMONADE-1L','1 litre','1 litre',220,120,true,true),
   ('coca-cola-1l','COCA-COLA-1L','1 litre','1 litre',180,95,true,true),
-  ('shisha','SHISHA-50G','50 g','50 g',850,520,true,true)
+  ('shisha','SHISHA-50G','50 g','50 g',850,520,true,true),
+  ('test','TEST-VARIANT-1','Variant 1','Variant 1',1,1,true,true),
+  ('test','TEST-VARIANT-2','Variant 2','Variant 2',1,1,true,false),
+  ('test','TEST-VARIANT-3','Variant 3','Variant 3',1,1,true,false)
 )
 INSERT INTO product_variants (product_id, sku, label, size_label, price_minor, cost_price_minor, active, is_default)
 SELECT p.id,vs.sku,vs.label,vs.size_label,vs.price_minor,vs.cost_price_minor,vs.active,vs.is_default
@@ -165,7 +170,8 @@ WITH variant_seed(sku, stock) AS (VALUES
   ('GENERAL-MEAKINS-750ML',8),('HUNTERS-CHOICE-750ML',20),('COUNTY-750ML',25),
   ('GILBEYS-750ML',14),('FOUR-COUSINS-750ML',10),('CAPRICE-750ML',12),
   ('4TH-STREET-750ML',15),('PINEAPPLE-PUNCH-1L',30),('MANYATTA-750ML',24),
-  ('SMIRNOFF-ICE-330ML',48),('LEMONADE-1L',32),('COCA-COLA-1L',40),('SHISHA-50G',7)
+  ('SMIRNOFF-ICE-330ML',48),('LEMONADE-1L',32),('COCA-COLA-1L',40),('SHISHA-50G',7),
+  ('TEST-VARIANT-1',10),('TEST-VARIANT-2',10),('TEST-VARIANT-3',10)
 )
 INSERT INTO inventory (variant_id, on_hand_quantity)
 SELECT pv.id, vs.stock
