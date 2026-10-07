@@ -1,10 +1,103 @@
-import ComponentCard from "@/components/common/ComponentCard";
-import Input from "@/components/form/input/InputField";
-import BasicTableOne from "@/components/tables/BasicTableOne";
-import Badge from "@/components/ui/badge/Badge";
-import Button from "@/components/ui/button/Button";
+import DriverOperations from "@/components/admin/DriverOperations";
 import { sql } from "@/server/db";
-import { createRider,setRiderStatus } from "../actions";
 
-export const dynamic="force-dynamic";const money=new Intl.NumberFormat("en-KE",{style:"currency",currency:"KES",maximumFractionDigits:0});
-export default async function RidersPage({searchParams}:{searchParams:Promise<{q?:string;status?:string}>}){const {q="",status="all"}=await searchParams;const riders=await sql<{id:string;display_name:string|null;phone:string|null;user_status:string;availability:string;vehicle_type:string|null;vehicle_registration:string|null;active_deliveries:number;earnings_minor:number}[]>`SELECT r.id,u.display_name,u.phone,u.status::text AS user_status,r.availability::text,r.vehicle_type,r.vehicle_registration,COUNT(a.id) FILTER(WHERE a.status IN('ASSIGNED','ACCEPTED','PICKED_UP'))::int AS active_deliveries,r.earnings_minor::int FROM riders r JOIN users u ON u.id=r.user_id LEFT JOIN delivery_assignments a ON a.rider_id=r.id WHERE (${q}='' OR u.display_name ILIKE ${`%${q}%`} OR u.phone ILIKE ${`%${q}%`} OR r.vehicle_registration ILIKE ${`%${q}%`}) AND (${status}='all' OR (${status}='active' AND u.status='ACTIVE') OR (${status}='offboarded' AND u.status='DISABLED') OR r.availability::text=${status}) GROUP BY r.id,u.id ORDER BY u.display_name NULLS LAST`;return <div className="space-y-6"><ComponentCard title="Onboard driver" desc="Create a rider profile and assign their current vehicle details."><form action={createRider} className="grid gap-4 md:grid-cols-4 md:items-end"><label className="text-sm font-medium">Name<Input className="mt-2" name="name" required/></label><label className="text-sm font-medium">Phone<Input className="mt-2" name="phone" placeholder="07XX XXX XXX" required/></label><label className="text-sm font-medium">Vehicle type<Input className="mt-2" name="vehicleType" placeholder="Motorbike" required/></label><label className="text-sm font-medium">Registration<Input className="mt-2" name="registration"/></label><div><Button type="submit">Add driver</Button></div></form></ComponentCard><BasicTableOne title="Drivers" description="Search, monitor availability, assign deliveries, and offboard drivers." actions={<form className="flex gap-2"><Input name="q" defaultValue={q} placeholder="Search driver"/><select name="status" defaultValue={status} className="h-11 rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"><option value="all">All drivers</option><option value="active">Active</option><option value="ONLINE">Online</option><option value="BUSY">Busy</option><option value="OFFLINE">Offline</option><option value="offboarded">Offboarded</option></select><Button type="submit" size="sm" variant="outline">Search & filter</Button></form>} columns={["Driver","Phone","Vehicle","Active jobs","Earnings","Availability","Action"]} empty="No drivers match this search." rows={riders.map(r=>[<span key="n" className="font-semibold text-gray-800 dark:text-white/90">{r.display_name||"Unnamed driver"}</span>,r.phone??"—",[r.vehicle_type,r.vehicle_registration].filter(Boolean).join(" · ")||"—",r.active_deliveries,money.format(r.earnings_minor),<Badge key="s" size="sm" color={r.user_status!=="ACTIVE"?"error":r.availability==="ONLINE"?"success":r.availability==="BUSY"?"warning":"light"}>{r.user_status!=="ACTIVE"?"OFFBOARDED":r.availability}</Badge>,<form key="a" action={setRiderStatus.bind(null,r.id,r.user_status!=="ACTIVE")}><Button type="submit" size="sm" variant="outline">{r.user_status==="ACTIVE"?"Offboard":"Reactivate"}</Button></form>])}/></div>}
+export const dynamic = "force-dynamic";
+
+type DriverRow = {
+  id: string;
+  display_name: string | null;
+  phone: string | null;
+  user_status: string;
+  availability: string;
+  vehicle_type: string | null;
+  vehicle_registration: string | null;
+  active_deliveries: number;
+  assignments: number;
+  delivered: number;
+  cancelled: number;
+  earned_minor: number;
+  paid_minor: number;
+};
+
+type DeliveryRow = {
+  id: string;
+  rider_id: string;
+  rider_name: string | null;
+  assignment_status: string;
+  payout_minor: number;
+  payout_status: string;
+  order_number: string;
+  customer_name: string;
+  total_minor: number;
+  assigned_at: Date;
+  accepted_at: Date | null;
+  picked_up_at: Date | null;
+  delivered_at: Date | null;
+};
+
+export default async function RidersPage() {
+  const [drivers, deliveries] = await Promise.all([
+    sql<DriverRow[]>`
+      SELECT r.id,u.display_name,u.phone,u.status::text AS user_status,r.availability::text,
+             r.vehicle_type,r.vehicle_registration,
+             COUNT(da.id) FILTER (WHERE da.status IN ('ASSIGNED','ACCEPTED','PICKED_UP'))::int AS active_deliveries,
+             COUNT(da.id)::int AS assignments,
+             COUNT(da.id) FILTER (WHERE da.status = 'DELIVERED')::int AS delivered,
+             COUNT(da.id) FILTER (WHERE da.status IN ('DECLINED','CANCELLED'))::int AS cancelled,
+             COALESCE(SUM(da.payout_minor) FILTER (WHERE da.status = 'DELIVERED'),0)::int AS earned_minor,
+             COALESCE(SUM(da.payout_minor) FILTER (WHERE da.status = 'DELIVERED' AND da.payout_status = 'PAID'),0)::int AS paid_minor
+      FROM riders r
+      JOIN users u ON u.id = r.user_id
+      LEFT JOIN delivery_assignments da ON da.rider_id = r.id
+      GROUP BY r.id,u.id
+      ORDER BY delivered DESC,u.display_name NULLS LAST
+    `,
+    sql<DeliveryRow[]>`
+      SELECT da.id,da.rider_id,u.display_name AS rider_name,da.status::text AS assignment_status,
+             da.payout_minor,da.payout_status,o.order_number,o.customer_name,o.total_minor,
+             da.assigned_at,da.accepted_at,da.picked_up_at,da.delivered_at
+      FROM delivery_assignments da
+      JOIN orders o ON o.id = da.order_id
+      JOIN riders r ON r.id = da.rider_id
+      JOIN users u ON u.id = r.user_id
+      ORDER BY da.assigned_at DESC
+      LIMIT 250
+    `,
+  ]);
+
+  return (
+    <DriverOperations
+      drivers={drivers.map((driver) => ({
+        id: driver.id,
+        name: driver.display_name ?? "Unnamed driver",
+        phone: driver.phone ?? "",
+        userStatus: driver.user_status,
+        availability: driver.availability,
+        vehicle: [driver.vehicle_type, driver.vehicle_registration]
+          .filter(Boolean)
+          .join(" · "),
+        activeDeliveries: driver.active_deliveries,
+        assignments: driver.assignments,
+        delivered: driver.delivered,
+        cancelled: driver.cancelled,
+        earned: driver.earned_minor,
+        paid: driver.paid_minor,
+      }))}
+      deliveries={deliveries.map((delivery) => ({
+        id: delivery.id,
+        riderId: delivery.rider_id,
+        riderName: delivery.rider_name ?? "Unnamed driver",
+        status: delivery.assignment_status,
+        payout: delivery.payout_minor,
+        payoutStatus: delivery.payout_status,
+        orderNumber: delivery.order_number,
+        customerName: delivery.customer_name,
+        orderTotal: delivery.total_minor,
+        assignedAt: delivery.assigned_at.toISOString(),
+        acceptedAt: delivery.accepted_at?.toISOString() ?? null,
+        pickedUpAt: delivery.picked_up_at?.toISOString() ?? null,
+        deliveredAt: delivery.delivered_at?.toISOString() ?? null,
+      }))}
+    />
+  );
+}
