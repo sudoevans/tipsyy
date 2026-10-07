@@ -9,7 +9,7 @@ import {
 } from "@untitledui/icons-react/outline";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { updateInventory } from "@/app/[locale]/(admin)/admin/actions";
 import { useAdminToast } from "@/components/admin/AdminToast";
 import AdminPagination from "@/components/admin/AdminPagination";
@@ -65,6 +65,8 @@ export default function InventoryCatalog({
   const params = useSearchParams();
   const [query, setQuery] = useState(params.get("q") ?? "");
   const [editing, setEditing] = useState<InventoryItem | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRoot = useRef<HTMLDivElement>(null);
   const update = useCallback(
     (values: Record<string, string>) => {
       const next = new URLSearchParams(params.toString());
@@ -85,7 +87,22 @@ export default function InventoryCatalog({
     return () => window.clearTimeout(timer);
   }, [query, params, update]);
 
-  const activeFilter = filters.find((filter) => filter.value === health);
+  useEffect(() => {
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!filterRoot.current?.contains(event.target as Node)) {
+        setFilterOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFilterOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
 
   return (
     <div className="space-y-5">
@@ -111,28 +128,49 @@ export default function InventoryCatalog({
               className="h-10 w-full rounded-lg border border-gray-300 py-2 pr-3 pl-10 text-sm transition outline-none focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900"
             />
           </label>
-          <details className="relative shrink-0">
-            <summary className="inline-flex h-10 cursor-pointer list-none items-center gap-2 rounded-lg border border-gray-200 px-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5 [&::-webkit-details-marker]:hidden">
+          <div ref={filterRoot} className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setFilterOpen((open) => !open)}
+              aria-expanded={filterOpen}
+              aria-haspopup="menu"
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5"
+            >
               <Sliders04Icon className="size-4" />
-              {activeFilter?.label ?? "Filters"}
-            </summary>
-            <div className="absolute right-0 z-30 mt-2 w-48 overflow-hidden rounded-lg border border-gray-200 bg-white p-1 shadow-theme-md dark:border-gray-700 dark:bg-gray-900">
-              {filters.map((filter) => (
-                <button
-                  type="button"
-                  key={filter.value}
-                  onClick={() => update({ health: filter.value })}
-                  className={`flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition hover:bg-gray-50 dark:hover:bg-white/5 ${
-                    health === filter.value
-                      ? "bg-brand-50 font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300"
-                      : "text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
-          </details>
+              Filters
+              {health !== "all" ? (
+                <span
+                  className="size-1.5 rounded-full bg-brand-500"
+                  aria-label="One filter active"
+                />
+              ) : null}
+            </button>
+            {filterOpen ? (
+              <div
+                role="menu"
+                className="absolute right-0 z-30 mt-2 w-48 overflow-hidden rounded-lg border border-gray-200 bg-white p-1 shadow-theme-md dark:border-gray-700 dark:bg-gray-900"
+              >
+                {filters.map((filter) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={filter.value}
+                    onClick={() => {
+                      update({ health: filter.value });
+                      setFilterOpen(false);
+                    }}
+                    className={`flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition hover:bg-gray-50 dark:hover:bg-white/5 ${
+                      health === filter.value
+                        ? "bg-brand-50 font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300"
+                        : "text-gray-700 dark:text-gray-200"
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[940px] text-left text-sm">
