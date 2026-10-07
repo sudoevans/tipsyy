@@ -1,8 +1,6 @@
 "use client";
 import {
   ArchiveIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
   Copy01Icon,
   DotsVerticalIcon,
   Edit01Icon,
@@ -23,6 +21,7 @@ import {
   setProductsActive,
 } from "@/app/[locale]/(admin)/admin/actions";
 import { useAdminToast } from "@/components/admin/AdminToast";
+import AdminPagination from "@/components/admin/AdminPagination";
 import AdminSelect from "@/components/admin/AdminSelect";
 type Product = {
   id: string;
@@ -50,6 +49,7 @@ export default function ProductCatalog({
   page,
   pageCount,
   total,
+  pageSize,
 }: {
   products: Product[];
   categories: Option[];
@@ -57,6 +57,7 @@ export default function ProductCatalog({
   page: number;
   pageCount: number;
   total: number;
+  pageSize: number;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -277,31 +278,12 @@ export default function ProductCatalog({
             No products match these filters.
           </p>
         ) : null}
-        <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3 text-sm text-gray-500 dark:border-gray-800">
-          <span>
-            Showing {products.length ? (page - 1) * 12 + 1 : 0}–
-            {Math.min(page * 12, total)} of {total}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              disabled={page <= 1}
-              onClick={() => update({ page: String(page - 1) })}
-              className="inline-flex size-9 items-center justify-center rounded-lg border border-gray-200 disabled:opacity-40"
-            >
-              <ChevronLeftIcon className="size-4" />
-            </button>
-            <span>
-              {page} / {pageCount}
-            </span>
-            <button
-              disabled={page >= pageCount}
-              onClick={() => update({ page: String(page + 1) })}
-              className="inline-flex size-9 items-center justify-center rounded-lg border border-gray-200 disabled:opacity-40"
-            >
-              <ChevronRightIcon className="size-4" />
-            </button>
-          </div>
-        </div>
+        <AdminPagination
+          page={page}
+          pageCount={pageCount}
+          total={total}
+          pageSize={pageSize}
+        />
       </section>
       {adding ? (
         <AddProductDialog

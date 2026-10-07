@@ -1,4 +1,7 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { useState } from "react";
 import {
   Table,
   TableBody,
@@ -14,6 +17,8 @@ export default function BasicTableOne({
   rows,
   empty,
   actions,
+  pagination = true,
+  pageSize = 10,
 }: {
   title: string;
   description: string;
@@ -21,7 +26,16 @@ export default function BasicTableOne({
   rows: ReactNode[][];
   empty: string;
   actions?: ReactNode;
+  pagination?: boolean;
+  pageSize?: number;
 }) {
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const visibleRows = pagination
+    ? rows.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+    : rows;
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -55,7 +69,7 @@ export default function BasicTableOne({
                 </TableRow>
               </TableHeader>
               <TableBody className="divide-y divide-gray-100 dark:divide-white/5">
-                {rows.map((row, rowIndex) => (
+                {visibleRows.map((row, rowIndex) => (
                   <TableRow key={rowIndex}>
                     {row.map((cell, cellIndex) => (
                       <TableCell
@@ -75,6 +89,37 @@ export default function BasicTableOne({
             {empty}
           </div>
         )}
+        {pagination && rows.length > pageSize ? (
+          <div className="flex flex-col gap-3 border-t border-gray-100 px-5 py-3 text-sm text-gray-500 sm:flex-row sm:items-center sm:justify-between dark:border-white/5 dark:text-gray-400">
+            <span>
+              Showing {(currentPage - 1) * pageSize + 1}–
+              {Math.min(currentPage * pageSize, rows.length)} of {rows.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={currentPage === 1}
+                className="h-9 rounded-lg border border-gray-200 px-3 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+              >
+                Previous
+              </button>
+              <span className="text-xs font-medium">
+                {currentPage} / {pageCount}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setPage((current) => Math.min(pageCount, current + 1))
+                }
+                disabled={currentPage === pageCount}
+                className="h-9 rounded-lg border border-gray-200 px-3 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
