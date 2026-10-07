@@ -26,8 +26,17 @@
       "confirm": "Use this location",
       "orSelect": "or select a delivery area"
     },
-    "locations": { "kagochi": "Karatina University — Kagochi", "karatinaTown": "Karatina Town", "ihwagi": "Ihwagi", "kibirigwi": "Kibirigwi" },
-    "deliveryBanner": { "eyebrow": "Delivery area", "unselected": "Choose your delivery location to see availability.", "selected": "You are shopping from Tipsy Theoryy — {location}" },
+    "locations": {
+      "kagochi": "Karatina University — Kagochi",
+      "karatinaTown": "Karatina Town",
+      "ihwagi": "Ihwagi",
+      "kibirigwi": "Kibirigwi"
+    },
+    "deliveryBanner": {
+      "eyebrow": "Delivery area",
+      "unselected": "Choose your delivery location to see availability.",
+      "selected": "You are shopping from Tipsy Theoryy — {location}"
+    },
     "account": "Account",
     "cart": "Cart with {count} items",
     "searchLabel": "Search drinks, brands and categories",
@@ -37,7 +46,16 @@
     "popularProducts": "Popular products",
     "searchMatches": "Matching drinks",
     "navigation": { "shop": "Shop", "offers": "Offers" },
-    "categories": { "whisky": "Whisky", "spirits": "Spirits", "rum": "Rum", "beer": "Beer", "wine": "Wine", "vodka": "Vodka", "mixers": "Mixers", "gin": "Gin" },
+    "categories": {
+      "whisky": "Whisky",
+      "spirits": "Spirits",
+      "rum": "Rum",
+      "beer": "Beer",
+      "wine": "Wine",
+      "vodka": "Vodka",
+      "mixers": "Mixers",
+      "gin": "Gin"
+    },
     "categoryTitle": "Categories",
     "seeAll": "See all",
     "popularNearYou": "Popular Near You",
@@ -56,50 +74,249 @@
       "next": "Next promotion",
       "showSlide": "Show promotion {number}",
       "slides": {
-        "whisky": { "eyebrow": "Weekend ready?", "title": "Get 20% off selected whiskies", "description": "Selected bottles only. While stock lasts." },
-        "beer": { "eyebrow": "Popular now", "title": "Cold beers for the weekend", "description": "Browse selected beers available for delivery." },
-        "mixers": { "eyebrow": "Mix it up", "title": "Mixers for every bottle", "description": "Find the essentials for your next round." }
+        "whisky": {
+          "eyebrow": "Weekend ready?",
+          "title": "Get 20% off selected whiskies",
+          "description": "Selected bottles only. While stock lasts."
+        },
+        "beer": {
+          "eyebrow": "Popular now",
+          "title": "Cold beers for the weekend",
+          "description": "Browse selected beers available for delivery."
+        },
+        "mixers": {
+          "eyebrow": "Mix it up",
+          "title": "Mixers for every bottle",
+          "description": "Find the essentials for your next round."
+        }
       }
     },
-    "badges": { "staffPick": "Staff pick", "deal": "20% off", "available": "Popular" },
+    "badges": {
+      "staffPick": "Staff pick",
+      "deal": "20% off",
+      "available": "Popular"
+    },
     "addProduct": "Add {product} to cart",
     "viewDetails": "View details",
     "removeOne": "Remove one {product}",
     "removeProduct": "Remove {product}",
     "quantityFor": "{quantity} {product} in cart",
     "saveProduct": "Save {product}",
-    "products": { "glenmorangie": { "name": "Glenmorangie Original 10 Years" }, "jack-daniels": { "name": "Jack Daniel's Old No. 7" }, "red-label": { "name": "Johnnie Walker Red Label" }, "chalawan": { "name": "Chalawan Pale Ale" }, "woodford": { "name": "Woodford Reserve" }, "glenlivet": { "name": "The Glenlivet French Oak" }, "kc-pineapple": { "name": "KC Pineapple" }, "kc-ginger": { "name": "KC Ginger" }, "kc-smooth": { "name": "KC Smooth" }, "vat-69": { "name": "VAT 69" }, "kane-extra": { "name": "Kane Extra" }, "captain-morgan-gold": { "name": "Captain Morgan Gold" }, "captain-morgan-muck-pit": { "name": "Captain Morgan Muck Pit" }, "black-and-white": { "name": "Black & White" }, "viceroy": { "name": "Viceroy" }, "general-meakins": { "name": "General Meakins" }, "hunters-choice": { "name": "Hunter's Choice" }, "county": { "name": "County" }, "gilbeys": { "name": "Gilbey's" }, "four-cousins": { "name": "Four Cousins" }, "caprice": { "name": "Caprice" }, "4th-street": { "name": "4th Street" }, "pineapple-punch": { "name": "Pineapple Punch" }, "manyatta": { "name": "Manyatta" }, "smirnoff-ice": { "name": "Smirnoff Ice" }, "lemonade": { "name": "Lemonade" }, "coca-cola-1l": { "name": "Coca-Cola 1 Litre" }, "shisha": { "name": "Shisha" } },
-    "productDetails": {
-      "glenmorangie": { "description": "A smooth Highland single malt with citrus, vanilla and honeyed notes.", "type": "Single malt whisky", "country": "Scotland", "abv": "40%" },
-      "jack-daniels": { "description": "Tennessee whiskey with a mellow charcoal character and a touch of caramel.", "type": "Tennessee whiskey", "country": "United States", "abv": "40%" },
-      "red-label": { "description": "A lively blended Scotch with spice, smoke and bright citrus notes.", "type": "Blended Scotch whisky", "country": "Scotland", "abv": "40%" },
-      "chalawan": { "description": "A tropical pale ale with citrus aroma and a clean, crisp finish.", "type": "Pale ale", "country": "Thailand", "abv": "4.7%" },
-      "woodford": { "description": "A Kentucky bourbon with dried fruit, cocoa and gentle toasted oak.", "type": "Kentucky straight bourbon", "country": "United States", "abv": "43.2%" },
-      "glenlivet": { "description": "A rich Speyside malt with fruit, spice and French oak character.", "type": "Single malt whisky", "country": "Scotland", "abv": "40%" },
-      "kc-pineapple": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Flavoured spirit", "country": "Details coming soon", "abv": "Details coming soon" },
-      "kc-ginger": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Flavoured spirit", "country": "Details coming soon", "abv": "Details coming soon" },
-      "kc-smooth": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Spirit", "country": "Details coming soon", "abv": "Details coming soon" },
-      "vat-69": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Whisky", "country": "Details coming soon", "abv": "Details coming soon" },
-      "kane-extra": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Spirit", "country": "Details coming soon", "abv": "Details coming soon" },
-      "captain-morgan-gold": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Rum", "country": "Details coming soon", "abv": "Details coming soon" },
-      "captain-morgan-muck-pit": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Rum", "country": "Details coming soon", "abv": "Details coming soon" },
-      "black-and-white": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Whisky", "country": "Details coming soon", "abv": "Details coming soon" },
-      "viceroy": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Spirit", "country": "Details coming soon", "abv": "Details coming soon" },
-      "general-meakins": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Spirit", "country": "Details coming soon", "abv": "Details coming soon" },
-      "hunters-choice": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Whisky", "country": "Details coming soon", "abv": "Details coming soon" },
-      "county": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Spirit", "country": "Details coming soon", "abv": "Details coming soon" },
-      "gilbeys": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Gin", "country": "Details coming soon", "abv": "Details coming soon" },
-      "four-cousins": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Wine", "country": "Details coming soon", "abv": "Details coming soon" },
-      "caprice": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Wine", "country": "Details coming soon", "abv": "Details coming soon" },
-      "4th-street": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Wine", "country": "Details coming soon", "abv": "Details coming soon" },
-      "pineapple-punch": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Mixer", "country": "Details coming soon", "abv": "Details coming soon" },
-      "manyatta": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Wine", "country": "Details coming soon", "abv": "Details coming soon" },
-      "smirnoff-ice": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Ready-to-drink", "country": "Details coming soon", "abv": "Details coming soon" },
-      "lemonade": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Mixer", "country": "Details coming soon", "abv": "Details coming soon" },
-      "coca-cola-1l": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Mixer", "country": "Details coming soon", "abv": "0%" },
-      "shisha": { "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.", "type": "Shisha", "country": "Details coming soon", "abv": "Not applicable" }
+    "products": {
+      "glenmorangie": { "name": "Glenmorangie Original 10 Years" },
+      "jack-daniels": { "name": "Jack Daniel's Old No. 7" },
+      "red-label": { "name": "Johnnie Walker Red Label" },
+      "chalawan": { "name": "Chalawan Pale Ale" },
+      "woodford": { "name": "Woodford Reserve" },
+      "glenlivet": { "name": "The Glenlivet French Oak" },
+      "kc-pineapple": { "name": "KC Pineapple" },
+      "kc-ginger": { "name": "KC Ginger" },
+      "kc-smooth": { "name": "KC Smooth" },
+      "vat-69": { "name": "VAT 69" },
+      "kane-extra": { "name": "Kane Extra" },
+      "captain-morgan-gold": { "name": "Captain Morgan Gold" },
+      "captain-morgan-muck-pit": { "name": "Captain Morgan Muck Pit" },
+      "black-and-white": { "name": "Black & White" },
+      "viceroy": { "name": "Viceroy" },
+      "general-meakins": { "name": "General Meakins" },
+      "hunters-choice": { "name": "Hunter's Choice" },
+      "county": { "name": "County" },
+      "gilbeys": { "name": "Gilbey's" },
+      "four-cousins": { "name": "Four Cousins" },
+      "caprice": { "name": "Caprice" },
+      "4th-street": { "name": "4th Street" },
+      "pineapple-punch": { "name": "Pineapple Punch" },
+      "manyatta": { "name": "Manyatta" },
+      "smirnoff-ice": { "name": "Smirnoff Ice" },
+      "lemonade": { "name": "Lemonade" },
+      "coca-cola-1l": { "name": "Coca-Cola 1 Litre" },
+      "shisha": { "name": "Shisha" }
     },
-    "details": { "back": "Back to shop", "reviews": "rating", "volume": "Volume", "type": "Type", "country": "Country", "abv": "ABV", "quantity": "Quantity", "decreaseQuantity": "Decrease quantity", "increaseQuantity": "Increase quantity", "addToCart": "Add to cart", "similarProducts": "Similar Products", "selectOption": "Select option" },
+    "productDetails": {
+      "glenmorangie": {
+        "description": "A smooth Highland single malt with citrus, vanilla and honeyed notes.",
+        "type": "Single malt whisky",
+        "country": "Scotland",
+        "abv": "40%"
+      },
+      "jack-daniels": {
+        "description": "Tennessee whiskey with a mellow charcoal character and a touch of caramel.",
+        "type": "Tennessee whiskey",
+        "country": "United States",
+        "abv": "40%"
+      },
+      "red-label": {
+        "description": "A lively blended Scotch with spice, smoke and bright citrus notes.",
+        "type": "Blended Scotch whisky",
+        "country": "Scotland",
+        "abv": "40%"
+      },
+      "chalawan": {
+        "description": "A tropical pale ale with citrus aroma and a clean, crisp finish.",
+        "type": "Pale ale",
+        "country": "Thailand",
+        "abv": "4.7%"
+      },
+      "woodford": {
+        "description": "A Kentucky bourbon with dried fruit, cocoa and gentle toasted oak.",
+        "type": "Kentucky straight bourbon",
+        "country": "United States",
+        "abv": "43.2%"
+      },
+      "glenlivet": {
+        "description": "A rich Speyside malt with fruit, spice and French oak character.",
+        "type": "Single malt whisky",
+        "country": "Scotland",
+        "abv": "40%"
+      },
+      "kc-pineapple": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Flavoured spirit",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "kc-ginger": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Flavoured spirit",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "kc-smooth": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Spirit",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "vat-69": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Whisky",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "kane-extra": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Spirit",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "captain-morgan-gold": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Rum",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "captain-morgan-muck-pit": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Rum",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "black-and-white": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Whisky",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "viceroy": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Spirit",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "general-meakins": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Spirit",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "hunters-choice": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Whisky",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "county": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Spirit",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "gilbeys": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Gin",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "four-cousins": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Wine",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "caprice": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Wine",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "4th-street": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Wine",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "pineapple-punch": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Mixer",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "manyatta": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Wine",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "smirnoff-ice": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Ready-to-drink",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "lemonade": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Mixer",
+        "country": "Details coming soon",
+        "abv": "Details coming soon"
+      },
+      "coca-cola-1l": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Mixer",
+        "country": "Details coming soon",
+        "abv": "0%"
+      },
+      "shisha": {
+        "description": "This product has been added to the catalogue. Pricing and complete product information will be confirmed before it can be ordered.",
+        "type": "Shisha",
+        "country": "Details coming soon",
+        "abv": "Not applicable"
+      }
+    },
+    "details": {
+      "back": "Back to shop",
+      "reviews": "rating",
+      "volume": "Volume",
+      "type": "Type",
+      "country": "Country",
+      "abv": "ABV",
+      "quantity": "Quantity",
+      "decreaseQuantity": "Decrease quantity",
+      "increaseQuantity": "Increase quantity",
+      "addToCart": "Add to cart",
+      "similarProducts": "Similar Products",
+      "selectOption": "Select option",
+      "comingSoon": "Details coming soon"
+    },
     "cartDrawerTitle": "Cart",
     "closeCart": "Close cart",
     "cartItems": "{count, plural, one {# bottle} other {# bottles}}",
@@ -115,15 +332,29 @@
     "cartBottleLabel": "Bottles",
     "cartPriceNote": "Final delivery fee will be confirmed at checkout.",
     "mobileNavigation": "Mobile navigation",
-    "mobileNav": { "home": "Home", "search": "Search", "orders": "Orders", "profile": "Profile" },
+    "mobileNav": {
+      "home": "Home",
+      "search": "Search",
+      "orders": "Orders",
+      "profile": "Profile"
+    },
     "faq": {
       "eyebrow": "Need help?",
       "title": "Frequently asked questions",
       "description": "Everything you need to know before placing an order.",
       "items": {
-        "delivery": { "question": "Where do you deliver?", "answer": "Delivery is available across selected areas around Karatina University. Confirm your delivery address at checkout." },
-        "payment": { "question": "Which payment methods can I use?", "answer": "Pay securely with M-Pesa at checkout." },
-        "age": { "question": "Do I need to verify my age?", "answer": "Yes. You must be 18 or older to place an order, and age may be verified at delivery." }
+        "delivery": {
+          "question": "Where do you deliver?",
+          "answer": "Delivery is available across selected areas around Karatina University. Confirm your delivery address at checkout."
+        },
+        "payment": {
+          "question": "Which payment methods can I use?",
+          "answer": "Pay securely with M-Pesa at checkout."
+        },
+        "age": {
+          "question": "Do I need to verify my age?",
+          "answer": "Yes. You must be 18 or older to place an order, and age may be verified at delivery."
+        }
       }
     },
     "footer": {
@@ -132,8 +363,19 @@
       "terms": "Terms · Privacy · Refunds",
       "payments": "Payment methods",
       "paymentNote": "Payments are securely processed through M-Pesa.",
-      "shop": { "title": "Shop", "whisky": "Whisky", "beer": "Beer", "wine": "Wine", "offers": "Offers" },
-      "help": { "title": "Help", "orders": "My orders", "delivery": "Delivery areas", "support": "Help & support" }
+      "shop": {
+        "title": "Shop",
+        "whisky": "Whisky",
+        "beer": "Beer",
+        "wine": "Wine",
+        "offers": "Offers"
+      },
+      "help": {
+        "title": "Help",
+        "orders": "My orders",
+        "delivery": "Delivery areas",
+        "support": "Help & support"
+      }
     }
   },
   "common": {
