@@ -148,7 +148,7 @@ export default function InventoryCatalog({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {items.map((item) => (
+              {items.map((item, index) => (
                 <tr
                   key={item.variantId}
                   className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"
@@ -179,6 +179,7 @@ export default function InventoryCatalog({
                   <td className="px-5 py-4 text-right">
                     <InventoryActions
                       item={item}
+                      openUp={index >= items.length - 2}
                       onEdit={() => setEditing(item)}
                     />
                   </td>
@@ -229,9 +230,11 @@ function HealthBadge({ item }: { item: InventoryItem }) {
 
 function InventoryActions({
   item,
+  openUp,
   onEdit,
 }: {
   item: InventoryItem;
+  openUp: boolean;
   onEdit: () => void;
 }) {
   return (
@@ -239,7 +242,9 @@ function InventoryActions({
       <summary className="inline-flex size-9 cursor-pointer list-none items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-white/5 [&::-webkit-details-marker]:hidden">
         <DotsVerticalIcon className="size-4" />
       </summary>
-      <div className="absolute right-0 z-30 mt-1 w-40 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-theme-md dark:border-gray-700 dark:bg-gray-900">
+      <div
+        className={`absolute right-0 z-30 w-40 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-theme-md dark:border-gray-700 dark:bg-gray-900 ${openUp ? "bottom-full mb-1" : "mt-1"}`}
+      >
         <button
           type="button"
           onClick={onEdit}

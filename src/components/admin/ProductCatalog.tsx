@@ -254,10 +254,11 @@ export default function ProductCatalog({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {products.map((product) => (
+              {products.map((product, index) => (
                 <ProductRow
                   key={product.id}
                   product={product}
+                  openUp={index >= products.length - 2}
                   selected={selected.has(product.id)}
                   onToggle={() =>
                     setSelected((current) => {
@@ -314,11 +315,13 @@ function Head({
 }
 function ProductRow({
   product,
+  openUp,
   selected,
   onToggle,
   onRun,
 }: {
   product: Product;
+  openUp: boolean;
   selected: boolean;
   onToggle: () => void;
   onRun: (title: string, action: () => Promise<void>) => void;
@@ -374,7 +377,9 @@ function ProductRow({
           <summary className="inline-flex size-9 cursor-pointer list-none items-center justify-center rounded-lg border border-gray-200 text-gray-500 [&::-webkit-details-marker]:hidden">
             <DotsVerticalIcon className="size-4" />
           </summary>
-          <div className="absolute right-0 z-20 mt-1 w-36 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-theme-md dark:border-gray-700 dark:bg-gray-900">
+          <div
+            className={`absolute right-0 z-20 w-36 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-theme-md dark:border-gray-700 dark:bg-gray-900 ${openUp ? "bottom-full mb-1" : "mt-1"}`}
+          >
             <Link
               href={`/admin/products/${product.id}`}
               className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50"
