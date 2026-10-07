@@ -30,12 +30,16 @@ type NavItem = {
 const operations: NavItem[] = [
   { label: "Overview", path: "/admin", icon: <GridIcon />, exact: true },
   { label: "Orders", path: "/admin/orders", icon: <TableIcon /> },
-  { label: "Transactions", path: "/admin/transactions", icon: <DollarLineIcon /> },
+  {
+    label: "Transactions",
+    path: "/admin/transactions",
+    icon: <DollarLineIcon />,
+  },
   { label: "Products", path: "/admin/products", icon: <BoxCubeIcon /> },
   { label: "Inventory", path: "/admin/inventory", icon: <ListIcon /> },
   { label: "Customers", path: "/admin/customers", icon: <GroupIcon /> },
   { label: "Drivers", path: "/admin/riders", icon: <UserCircleIcon /> },
-  { label: "Delivery", path: "/admin/delivery", icon: <TaskIcon /> },
+  { label: "Delivery zones", path: "/admin/delivery", icon: <TaskIcon /> },
 ];
 
 const growth: NavItem[] = [
@@ -126,8 +130,16 @@ export default function AppSidebar() {
         <Link href="/admin" aria-label="Tipsy Theory operations">
           {expanded ? (
             <span className="flex items-center gap-2.5">
-              <Image src="/images/logo/logo-icon.svg" alt="" width={32} height={32} priority />
-              <span className="text-xl font-semibold tracking-[-0.03em] text-gray-900 dark:text-white">TipsyAdmin</span>
+              <Image
+                src="/images/logo/logo-icon.svg"
+                alt=""
+                width={32}
+                height={32}
+                priority
+              />
+              <span className="text-xl font-semibold tracking-[-0.03em] text-gray-900 dark:text-white">
+                TipsyAdmin
+              </span>
             </span>
           ) : (
             <Image

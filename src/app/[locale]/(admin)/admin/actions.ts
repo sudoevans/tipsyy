@@ -649,6 +649,29 @@ export async function saveDeliveryArea(formData: FormData) {
   revalidatePath("/admin/delivery");
 }
 
+export async function setDeliveryAreaActive(
+  areaId: string,
+  active: boolean,
+) {
+  const admin = await requireAdministrator();
+  const id = idSchema.parse(areaId);
+  const [area] = await sql<{ id: string; name: string }[]>`
+    UPDATE delivery_areas
+    SET active = ${active}, updated_at = now()
+    WHERE id = ${id}
+    RETURNING id, name
+  `;
+  if (!area) throw new Error("This delivery zone no longer exists.");
+  await audit(
+    admin.id,
+    active ? "delivery_area.activated" : "delivery_area.deactivated",
+    "delivery_area",
+    area.id,
+    { name: area.name },
+  );
+  revalidatePath("/admin/delivery");
+}
+
 export async function createVendor(formData: FormData) {
   const admin = await requireAdministrator();
   const input = z
