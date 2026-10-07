@@ -1173,6 +1173,17 @@ function RecordDriverPayoutDialog({
   const { showToast } = useAdminToast();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [orderQuery, setOrderQuery] = useState("");
+  const filteredOrders = useMemo(() => {
+    const query = orderQuery.trim().toLowerCase();
+    if (!query) return payment.orders;
+    return payment.orders.filter((order) =>
+      [order.orderNumber, order.customerName]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [orderQuery, payment.orders]);
   const submit = (form: HTMLFormElement) =>
     startTransition(async () => {
       try {
@@ -1258,6 +1269,15 @@ function RecordDriverPayoutDialog({
           </div>
         </div>
         <div className="mx-5 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+          <label className="relative block border-b border-gray-100 p-3 dark:border-gray-800">
+            <SearchLgIcon className="pointer-events-none absolute top-1/2 left-6 size-4 -translate-y-1/2 text-gray-400" />
+            <input
+              value={orderQuery}
+              onChange={(event) => setOrderQuery(event.target.value)}
+              placeholder="Filter order or customer"
+              className="h-9 w-full rounded-md border border-gray-200 py-2 pr-3 pl-9 text-sm outline-none focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900"
+            />
+          </label>
           <div className="max-h-64 overflow-y-auto">
             <table className="w-full text-left text-sm">
               <thead className="sticky top-0 bg-gray-50 text-xs text-gray-500 dark:bg-gray-900">
@@ -1268,7 +1288,7 @@ function RecordDriverPayoutDialog({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {payment.orders.map((order) => (
+                {filteredOrders.map((order) => (
                   <tr key={order.orderNumber}>
                     <td className="px-4 py-3">
                       <span className="block font-semibold text-gray-800 dark:text-white">
@@ -1286,6 +1306,16 @@ function RecordDriverPayoutDialog({
                     </td>
                   </tr>
                 ))}
+                {!filteredOrders.length ? (
+                  <tr>
+                    <td
+                      colSpan={3}
+                      className="px-4 py-8 text-center text-sm text-gray-500"
+                    >
+                      No orders match this filter.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
