@@ -1,4 +1,5 @@
 import InventoryCatalog from "@/components/admin/InventoryCatalog";
+import { expireReservations } from "@/server/checkout";
 import { sql } from "@/server/db";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +35,7 @@ export default async function InventoryPage({
   searchParams: Promise<{ q?: string; health?: string; page?: string }>;
 }) {
   const input = await searchParams;
+  await expireReservations();
   const q = (input.q ?? "").trim();
   const health = ["all", "healthy", "low", "out"].includes(input.health ?? "")
     ? (input.health ?? "all")

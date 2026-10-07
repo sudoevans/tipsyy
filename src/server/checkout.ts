@@ -517,6 +517,7 @@ export async function createCheckoutOrder(
 }
 
 export async function getCatalog() {
+  await expireReservations();
   return sql`
     SELECT p.slug, p.name, p.description, p.image_url, p.alcohol_by_volume, p.featured,
            c.slug AS category_slug, c.name AS category_name, b.name AS brand_name,
@@ -540,6 +541,7 @@ export async function quoteCart(input: z.infer<typeof cartQuoteSchema>) {
       (quantities.get(item.productSlug) ?? 0) + item.quantity,
     );
   return withTransaction(async (tx) => {
+    await releaseExpiredReservations(tx);
     const slugs = [...quantities.keys()];
     const rows = await tx<ProductRow[]>`
       SELECT pv.id AS variant_id, p.id AS product_id, p.slug AS product_slug, p.name AS product_name,
