@@ -1,8 +1,7 @@
-import Input from "@/components/form/input/InputField";
 import AdminPagination from "@/components/admin/AdminPagination";
+import OrderFilters from "@/components/admin/OrderFilters";
 import BasicTableOne from "@/components/tables/BasicTableOne";
 import Badge from "@/components/ui/badge/Badge";
-import Button from "@/components/ui/button/Button";
 import { sql } from "@/server/db";
 
 export const dynamic = "force-dynamic";
@@ -94,51 +93,41 @@ export default async function TransactionsPage({
         <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">
           Transactions
         </h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Every M-Pesa attempt is tied to its order, including cancellations,
-          retries, timeouts, and successful payments.
-        </p>
       </div>
       <BasicTableOne
-        title="Payment activity"
-        description="Use this ledger to investigate customer payment behaviour and payment outcomes."
         actions={
-          <form className="flex flex-wrap gap-2">
-            <Input
-              name="q"
-              defaultValue={q}
-              placeholder="Order, customer or phone"
-            />
-            <select
-              className="h-11 rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
-              defaultValue={status}
-              name="status"
-            >
-              <option value="all">All outcomes</option>
-              <option value="PENDING">Pending</option>
-              <option value="SUCCEEDED">Successful</option>
-              <option value="CANCELLED">Cancelled</option>
-              <option value="TIMED_OUT">Timed out</option>
-              <option value="FAILED">Failed</option>
-            </select>
-            <Button size="sm" type="submit" variant="outline">
-              Search & filter
-            </Button>
-          </form>
+          <OrderFilters
+            searchPlaceholder="Order, customer or phone"
+            statusOptions={[
+              { value: "all", label: "All outcomes" },
+              { value: "PENDING", label: "Pending" },
+              { value: "SUCCEEDED", label: "Successful" },
+              { value: "CANCELLED", label: "Cancelled" },
+              { value: "TIMED_OUT", label: "Timed out" },
+              { value: "FAILED", label: "Failed" },
+            ]}
+          />
         }
         columns={[
           "Order",
           "Transaction code",
           "Customer",
           "Amount",
-          "Payment",
-          "Attempt",
-          "Initiated",
-          "Completed",
+          "Outcome",
+          "Activity",
           "Provider message",
         ]}
         empty="No payment transactions match this search."
         pagination={false}
+        noHorizontalScroll
+        footer={
+          <AdminPagination
+            page={page}
+            pageCount={pageCount}
+            total={total}
+            pageSize={pageSize}
+          />
+        }
         rows={transactions.map((transaction) => {
           const attemptStatus =
             transaction.attempt_status ?? transaction.payment_status;
@@ -149,7 +138,9 @@ export default async function TransactionsPage({
             >
               {transaction.order_number}
             </span>,
-            transaction.provider_receipt ?? "N/A",
+            <span className="break-all" key="receipt">
+              {transaction.provider_receipt ?? "N/A"}
+            </span>,
             <span key="customer">
               <span className="block font-medium text-gray-800 dark:text-white/90">
                 {transaction.customer_name}
@@ -159,39 +150,36 @@ export default async function TransactionsPage({
               </span>
             </span>,
             money.format(transaction.amount_minor),
-            <Badge
-              color={badgeColor(transaction.payment_status)}
-              key="payment"
-              size="sm"
-            >
-              {transaction.payment_status.replaceAll("_", " ")}
-            </Badge>,
-            <Badge color={badgeColor(attemptStatus)} key="attempt" size="sm">
-              {attemptStatus.replaceAll("_", " ")}
-            </Badge>,
-            transaction.initiated_at
-              ? dateTime.format(transaction.initiated_at)
-              : "—",
-            transaction.completed_at
-              ? dateTime.format(transaction.completed_at)
-              : "—",
-            <span
-              className="line-clamp-2 max-w-xs text-sm text-gray-500"
-              key="message"
-            >
+            <div className="flex flex-wrap gap-1.5" key="outcome">
+              <Badge color={badgeColor(transaction.payment_status)} size="sm">
+                {transaction.payment_status.replaceAll("_", " ")}
+              </Badge>
+              {attemptStatus !== transaction.payment_status ? (
+                <Badge color={badgeColor(attemptStatus)} size="sm">
+                  {attemptStatus.replaceAll("_", " ")}
+                </Badge>
+              ) : null}
+            </div>,
+            <div className="space-y-1 text-xs leading-4" key="activity">
+              <p>
+                <span className="text-gray-400">Started: </span>
+                {transaction.initiated_at
+                  ? dateTime.format(transaction.initiated_at)
+                  : "—"}
+              </p>
+              <p>
+                <span className="text-gray-400">Completed: </span>
+                {transaction.completed_at
+                  ? dateTime.format(transaction.completed_at)
+                  : "—"}
+              </p>
+            </div>,
+            <span className="line-clamp-3 text-sm text-gray-500" key="message">
               {transaction.result_description ?? "—"}
             </span>,
           ];
         })}
       />
-      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-        <AdminPagination
-          page={page}
-          pageCount={pageCount}
-          total={total}
-          pageSize={pageSize}
-        />
-      </div>
     </div>
   );
 }
