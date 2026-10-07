@@ -2,7 +2,11 @@ import { z } from "zod";
 
 import { sql, type Transaction, withTransaction } from "./db";
 import { ApiError } from "./http";
-import { createOpaqueToken, hashSecret, normalizeKenyanPhone } from "./security";
+import {
+  createOpaqueToken,
+  hashSecret,
+  normalizeKenyanPhone,
+} from "./security";
 
 const checkoutItemSchema = z.object({
   productSlug: z.string().min(1).max(120),
@@ -71,6 +75,36 @@ interface CouponRow {
 
 const RESERVATION_MINUTES = 10;
 
+/**
+ * Guest checkout begins a customer record early, so incomplete payments are
+ * still visible to operations without granting the customer an active account.
+ */
+export async function ensureCheckoutCustomerAccount(
+  tx: Transaction,
+  name: string,
+  phone: string,
+) {
+  const [customer] = await tx<{ id: string; role: string }[]>`
+    INSERT INTO users (phone, display_name, role, status)
+    VALUES (${phone}, ${name}, 'CUSTOMER', 'PENDING')
+    ON CONFLICT (phone) DO UPDATE
+      SET display_name = COALESCE(NULLIF(users.display_name, ''), EXCLUDED.display_name),
+          updated_at = now()
+      WHERE users.role = 'CUSTOMER'
+    RETURNING id, role::text AS role
+  `;
+  if (!customer || customer.role !== "CUSTOMER") return null;
+
+  await tx`
+    INSERT INTO customer_profiles (user_id, legal_name)
+    VALUES (${customer.id}, ${name})
+    ON CONFLICT (user_id) DO UPDATE
+      SET legal_name = COALESCE(NULLIF(customer_profiles.legal_name, ''), EXCLUDED.legal_name),
+          updated_at = now()
+  `;
+  return customer.id;
+}
+
 export async function releaseCouponForOrder(tx: Transaction, orderId: string) {
   const redemptions = await tx<{ promotion_id: string }[]>`
     DELETE FROM coupon_redemptions cr
@@ -83,8 +117,14 @@ export async function releaseCouponForOrder(tx: Transaction, orderId: string) {
   }
 }
 
-export async function releaseOrderReservations(tx: Transaction, orderId: string, status: "RELEASED" | "EXPIRED" = "RELEASED") {
-  const reservations = await tx<{ id: string; variant_id: string; quantity: number }[]>`
+export async function releaseOrderReservations(
+  tx: Transaction,
+  orderId: string,
+  status: "RELEASED" | "EXPIRED" = "RELEASED",
+) {
+  const reservations = await tx<
+    { id: string; variant_id: string; quantity: number }[]
+  >`
     SELECT r.id, r.variant_id, r.quantity
     FROM inventory_reservations r
     JOIN inventory i ON i.variant_id = r.variant_id
@@ -105,15 +145,25 @@ export async function releaseOrderReservations(tx: Transaction, orderId: string,
   await releaseCouponForOrder(tx, orderId);
 }
 
-export async function convertOrderReservations(tx: Transaction, orderId: string) {
-  const reservations = await tx<{ id: string; variant_id: string; quantity: number }[]>`
+export async function convertOrderReservations(
+  tx: Transaction,
+  orderId: string,
+) {
+  const reservations = await tx<
+    { id: string; variant_id: string; quantity: number }[]
+  >`
     SELECT r.id, r.variant_id, r.quantity
     FROM inventory_reservations r
     JOIN inventory i ON i.variant_id = r.variant_id
     WHERE r.order_id = ${orderId} AND r.status = 'ACTIVE'
     FOR UPDATE OF r, i
   `;
-  if (reservations.length === 0) throw new ApiError(409, "RESERVATION_NOT_ACTIVE", "The stock reservation is no longer active.");
+  if (reservations.length === 0)
+    throw new ApiError(
+      409,
+      "RESERVATION_NOT_ACTIVE",
+      "The stock reservation is no longer active.",
+    );
   for (const reservation of reservations) {
     await tx`
       UPDATE inventory
@@ -132,7 +182,9 @@ export async function convertOrderReservations(tx: Transaction, orderId: string)
 }
 
 export async function releaseExpiredReservations(tx: Transaction) {
-  const expired = await tx<{ id: string; order_id: string; variant_id: string; quantity: number }[]>`
+  const expired = await tx<
+    { id: string; order_id: string; variant_id: string; quantity: number }[]
+  >`
     SELECT r.id, r.order_id, r.variant_id, r.quantity
     FROM inventory_reservations r
     JOIN inventory i ON i.variant_id = r.variant_id
@@ -204,12 +256,25 @@ async function calculateCoupon(
       AND (p.ends_at IS NULL OR p.ends_at > now())
     FOR UPDATE OF c, p
   `;
-  if (!coupon) throw new ApiError(422, "INVALID_COUPON", "This coupon is invalid or has expired.");
+  if (!coupon)
+    throw new ApiError(
+      422,
+      "INVALID_COUPON",
+      "This coupon is invalid or has expired.",
+    );
   if (subtotal < coupon.minimum_order_minor) {
-    throw new ApiError(422, "COUPON_MINIMUM_NOT_MET", `This coupon requires a minimum order of KSh ${coupon.minimum_order_minor.toLocaleString("en-KE")}.`);
+    throw new ApiError(
+      422,
+      "COUPON_MINIMUM_NOT_MET",
+      `This coupon requires a minimum order of KSh ${coupon.minimum_order_minor.toLocaleString("en-KE")}.`,
+    );
   }
   if (coupon.usage_limit !== null && coupon.usage_count >= coupon.usage_limit) {
-    throw new ApiError(422, "COUPON_LIMIT_REACHED", "This coupon has reached its usage limit.");
+    throw new ApiError(
+      422,
+      "COUPON_LIMIT_REACHED",
+      "This coupon has reached its usage limit.",
+    );
   }
   if (coupon.customer_usage_limit !== null) {
     const [{ count }] = await tx<{ count: number }[]>`
@@ -217,7 +282,11 @@ async function calculateCoupon(
       WHERE coupon_id = ${coupon.coupon_id} AND customer_phone = ${phone}
     `;
     if (count >= coupon.customer_usage_limit) {
-      throw new ApiError(422, "COUPON_CUSTOMER_LIMIT_REACHED", "You have already used this coupon the maximum number of times.");
+      throw new ApiError(
+        422,
+        "COUPON_CUSTOMER_LIMIT_REACHED",
+        "You have already used this coupon the maximum number of times.",
+      );
     }
   }
 
@@ -228,26 +297,46 @@ async function calculateCoupon(
     SELECT category_id FROM promotion_categories WHERE promotion_id = ${coupon.promotion_id}
   `;
   const productIds = new Set(productRestrictions.map((row) => row.product_id));
-  const categoryIds = new Set(categoryRestrictions.map((row) => row.category_id));
+  const categoryIds = new Set(
+    categoryRestrictions.map((row) => row.category_id),
+  );
   const restricted = productIds.size > 0 || categoryIds.size > 0;
   const eligibleSubtotal = items.reduce((sum, item) => {
-    const eligible = !restricted || productIds.has(item.product_id) || categoryIds.has(item.category_id);
+    const eligible =
+      !restricted ||
+      productIds.has(item.product_id) ||
+      categoryIds.has(item.category_id);
     return eligible ? sum + item.price_minor * item.quantity : sum;
   }, 0);
-  if (eligibleSubtotal === 0) throw new ApiError(422, "COUPON_NOT_APPLICABLE", "This coupon does not apply to the items in your cart.");
+  if (eligibleSubtotal === 0)
+    throw new ApiError(
+      422,
+      "COUPON_NOT_APPLICABLE",
+      "This coupon does not apply to the items in your cart.",
+    );
 
-  const calculated = coupon.kind === "PERCENTAGE"
-    ? Math.floor(eligibleSubtotal * (coupon.percentage_basis_points ?? 0) / 10_000)
-    : Math.min(eligibleSubtotal, coupon.amount_minor ?? 0);
+  const calculated =
+    coupon.kind === "PERCENTAGE"
+      ? Math.floor(
+          (eligibleSubtotal * (coupon.percentage_basis_points ?? 0)) / 10_000,
+        )
+      : Math.min(eligibleSubtotal, coupon.amount_minor ?? 0);
   return { discount: Math.min(subtotal, calculated), coupon };
 }
 
-export async function createCheckoutOrder(input: CreateOrderInput, cartId?: string) {
+export async function createCheckoutOrder(
+  input: CreateOrderInput,
+  cartId?: string,
+) {
   const phone = normalizeKenyanPhone(input.customer.phone);
   const accessToken = createOpaqueToken();
   const accessTokenHash = hashSecret(accessToken);
   const quantities = new Map<string, number>();
-  for (const item of input.items) quantities.set(item.productSlug, (quantities.get(item.productSlug) ?? 0) + item.quantity);
+  for (const item of input.items)
+    quantities.set(
+      item.productSlug,
+      (quantities.get(item.productSlug) ?? 0) + item.quantity,
+    );
 
   return withTransaction(async (tx) => {
     await releaseExpiredReservations(tx);
@@ -259,7 +348,11 @@ export async function createCheckoutOrder(input: CreateOrderInput, cartId?: stri
       LIMIT 1
     `;
     if (!deliveryArea) {
-      throw new ApiError(422, "UNSERVICEABLE_LOCATION", "We do not currently deliver to that location. Choose a supported delivery area.");
+      throw new ApiError(
+        422,
+        "UNSERVICEABLE_LOCATION",
+        "We do not currently deliver to that location. Choose a supported delivery area.",
+      );
     }
 
     const slugs = [...quantities.keys()];
@@ -275,26 +368,55 @@ export async function createCheckoutOrder(input: CreateOrderInput, cartId?: stri
     `;
     if (rows.length !== slugs.length) {
       const found = new Set(rows.map((row) => row.product_slug));
-      throw new ApiError(409, "CART_ITEM_UNAVAILABLE", "One or more cart items are no longer available.", {
-        unavailable: slugs.filter((slug) => !found.has(slug)),
-      });
+      throw new ApiError(
+        409,
+        "CART_ITEM_UNAVAILABLE",
+        "One or more cart items are no longer available.",
+        {
+          unavailable: slugs.filter((slug) => !found.has(slug)),
+        },
+      );
     }
 
-    const items = rows.map((row) => ({ ...row, quantity: quantities.get(row.product_slug)! }));
+    const items = rows.map((row) => ({
+      ...row,
+      quantity: quantities.get(row.product_slug)!,
+    }));
     for (const item of items) {
       const available = item.on_hand_quantity - item.reserved_quantity;
       if (item.quantity > available) {
-        throw new ApiError(409, "INSUFFICIENT_STOCK", `${item.product_name} has only ${available} available.`, {
-          productSlug: item.product_slug,
-          available,
-        });
+        throw new ApiError(
+          409,
+          "INSUFFICIENT_STOCK",
+          `${item.product_name} has only ${available} available.`,
+          {
+            productSlug: item.product_slug,
+            available,
+          },
+        );
       }
     }
 
-    const subtotal = items.reduce((sum, item) => sum + item.price_minor * item.quantity, 0);
-    const { coupon, discount } = await calculateCoupon(tx, input.couponCode, phone, items, subtotal);
+    const subtotal = items.reduce(
+      (sum, item) => sum + item.price_minor * item.quantity,
+      0,
+    );
+    const { coupon, discount } = await calculateCoupon(
+      tx,
+      input.couponCode,
+      phone,
+      items,
+      subtotal,
+    );
     const total = subtotal - discount + deliveryArea.fee_minor;
-    const reservationExpiresAt = new Date(Date.now() + RESERVATION_MINUTES * 60_000);
+    const reservationExpiresAt = new Date(
+      Date.now() + RESERVATION_MINUTES * 60_000,
+    );
+    const customerUserId = await ensureCheckoutCustomerAccount(
+      tx,
+      input.customer.name.trim(),
+      phone,
+    );
     const address = {
       areaSlug: deliveryArea.slug,
       areaName: deliveryArea.name,
@@ -304,13 +426,15 @@ export async function createCheckoutOrder(input: CreateOrderInput, cartId?: stri
       longitude: input.delivery.longitude,
     };
 
-    const [order] = await tx<{ id: string; order_number: string; created_at: Date }[]>`
+    const [order] = await tx<
+      { id: string; order_number: string; created_at: Date }[]
+    >`
       INSERT INTO orders (
-        access_token_hash, cart_id, delivery_area_id, customer_name, customer_phone, delivery_address,
+        access_token_hash, user_id, cart_id, delivery_area_id, customer_name, customer_phone, delivery_address,
         delivery_instructions, subtotal_minor, discount_minor, delivery_fee_minor, total_minor,
         coupon_code, reservation_expires_at
       ) VALUES (
-        ${accessTokenHash}, ${cartId ?? null}, ${deliveryArea.id}, ${input.customer.name.trim()}, ${phone}, ${tx.json(address)},
+        ${accessTokenHash}, ${customerUserId}, ${cartId ?? null}, ${deliveryArea.id}, ${input.customer.name.trim()}, ${phone}, ${tx.json(address)},
         ${input.delivery.instructions ?? null}, ${subtotal}, ${discount}, ${deliveryArea.fee_minor}, ${total},
         ${input.couponCode?.toUpperCase() ?? null}, ${reservationExpiresAt}
       )
@@ -356,7 +480,8 @@ export async function createCheckoutOrder(input: CreateOrderInput, cartId?: stri
         VALUES (${coupon.coupon_id}, ${phone}, ${order.id}, ${discount})
       `;
     }
-    if (cartId) await tx`UPDATE carts SET status = 'CONVERTED', updated_at = now() WHERE id = ${cartId} AND status = 'ACTIVE'`;
+    if (cartId)
+      await tx`UPDATE carts SET status = 'CONVERTED', updated_at = now() WHERE id = ${cartId} AND status = 'ACTIVE'`;
 
     return {
       orderId: order.id,
@@ -384,7 +509,8 @@ export async function createCheckoutOrder(input: CreateOrderInput, cartId?: stri
         quantity: item.quantity,
         unitPrice: item.price_minor,
         lineTotal: item.price_minor * item.quantity,
-        availableAfterReservation: item.on_hand_quantity - item.reserved_quantity - item.quantity,
+        availableAfterReservation:
+          item.on_hand_quantity - item.reserved_quantity - item.quantity,
       })),
     };
   });
@@ -408,7 +534,11 @@ export async function getCatalog() {
 
 export async function quoteCart(input: z.infer<typeof cartQuoteSchema>) {
   const quantities = new Map<string, number>();
-  for (const item of input.items) quantities.set(item.productSlug, (quantities.get(item.productSlug) ?? 0) + item.quantity);
+  for (const item of input.items)
+    quantities.set(
+      item.productSlug,
+      (quantities.get(item.productSlug) ?? 0) + item.quantity,
+    );
   return withTransaction(async (tx) => {
     const slugs = [...quantities.keys()];
     const rows = await tx<ProductRow[]>`
@@ -419,22 +549,56 @@ export async function quoteCart(input: z.infer<typeof cartQuoteSchema>) {
       JOIN inventory i ON i.variant_id = pv.id
       WHERE p.active = true AND p.slug = ANY(${tx.array(slugs)})
     `;
-    if (rows.length !== slugs.length) throw new ApiError(409, "CART_ITEM_UNAVAILABLE", "One or more cart items are no longer available.");
-    const items = rows.map((row) => ({ ...row, quantity: quantities.get(row.product_slug)! }));
+    if (rows.length !== slugs.length)
+      throw new ApiError(
+        409,
+        "CART_ITEM_UNAVAILABLE",
+        "One or more cart items are no longer available.",
+      );
+    const items = rows.map((row) => ({
+      ...row,
+      quantity: quantities.get(row.product_slug)!,
+    }));
     for (const item of items) {
       const available = item.on_hand_quantity - item.reserved_quantity;
-      if (item.quantity > available) throw new ApiError(409, "INSUFFICIENT_STOCK", `${item.product_name} has only ${available} available.`, { productSlug: item.product_slug, available });
+      if (item.quantity > available)
+        throw new ApiError(
+          409,
+          "INSUFFICIENT_STOCK",
+          `${item.product_name} has only ${available} available.`,
+          { productSlug: item.product_slug, available },
+        );
     }
-    const subtotal = items.reduce((sum, item) => sum + item.price_minor * item.quantity, 0);
-    const { discount } = await calculateCoupon(tx, input.couponCode, "guest", items, subtotal);
+    const subtotal = items.reduce(
+      (sum, item) => sum + item.price_minor * item.quantity,
+      0,
+    );
+    const { discount } = await calculateCoupon(
+      tx,
+      input.couponCode,
+      "guest",
+      items,
+      subtotal,
+    );
     let deliveryFee = 0;
     if (input.deliveryArea) {
       const [area] = await tx<{ fee_minor: number }[]>`
         SELECT fee_minor FROM delivery_areas WHERE active = true AND (slug = ${input.deliveryArea} OR lower(name) = lower(${input.deliveryArea})) LIMIT 1
       `;
-      if (!area) throw new ApiError(422, "UNSERVICEABLE_LOCATION", "Choose a supported delivery area.");
+      if (!area)
+        throw new ApiError(
+          422,
+          "UNSERVICEABLE_LOCATION",
+          "Choose a supported delivery area.",
+        );
       deliveryFee = area.fee_minor;
     }
-    return { currency: "KES", subtotal, discount, deliveryFee, total: subtotal - discount + deliveryFee };
+    return {
+      currency: "KES",
+      subtotal,
+      discount,
+      deliveryFee,
+      total: subtotal - discount + deliveryFee,
+    };
   });
 }
