@@ -49,6 +49,10 @@ export async function loginAdmin(input: z.infer<typeof adminLoginSchema>) {
     const token = createOpaqueToken();
     const expiresAt = new Date(Date.now() + ADMIN_SESSION_HOURS * 60 * 60_000);
     await sql`INSERT INTO admin_sessions (user_id, token_hash, expires_at) VALUES (${account.id}, ${hashSecret(token)}, ${expiresAt})`;
+    await sql`
+      INSERT INTO admin_activity_logs (actor_user_id, action, entity_type, entity_id, metadata)
+      VALUES (${account.id}, 'admin.signed_in', 'user', ${account.id}, ${sql.json({ username: account.username })})
+    `;
     return { token, expiresAt, user: { id: account.id, username: account.username, displayName: account.display_name, role: account.role } };
 }
 

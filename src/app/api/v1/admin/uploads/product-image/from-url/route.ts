@@ -3,6 +3,7 @@ import path from "node:path";
 import { cookies } from "next/headers";
 import { ADMIN_SESSION_COOKIE } from "@/server/admin-session-cookie";
 import { getAdminFromSession } from "@/server/admin-auth";
+import { sql } from "@/server/db";
 import { ApiError, apiErrorResponse, apiSuccess } from "@/server/http";
 
 export const runtime = "nodejs";
@@ -49,6 +50,10 @@ export async function POST(request: Request) {
     await mkdir(directory, { recursive: true });
     const filename = `${crypto.randomUUID()}.${extension}`;
     await writeFile(path.join(directory, filename), bytes);
+    await sql`
+      INSERT INTO admin_activity_logs (actor_user_id, action, entity_type, entity_id, metadata)
+      VALUES (${admin.id}, 'product_image.retrieved', 'product_image', ${filename}, ${sql.json({ source: 'url', sourceUrl: finalUrl.toString() })})
+    `;
     return apiSuccess({ url: `/uploads/products/${filename}`, sourceUrl: finalUrl.toString() }, { status: 201 });
   } catch (error) {
     return apiErrorResponse(error, requestId);

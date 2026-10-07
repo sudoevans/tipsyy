@@ -28,6 +28,7 @@ type TransactionRow = {
   result_description: string | null;
   initiated_at: Date | null;
   completed_at: Date | null;
+  attempt_count: number;
 };
 
 function badgeColor(status: string) {
@@ -62,11 +63,14 @@ export default async function TransactionsPage({
     SELECT COUNT(*)::int AS count
     FROM payments p
     JOIN orders o ON o.id = p.order_id
-    LEFT JOIN payment_attempts pa ON pa.payment_id = p.id
     WHERE (
       ${q} = '' OR o.order_number ILIKE ${`%${q}%`} OR o.customer_name ILIKE ${`%${q}%`} OR o.customer_phone ILIKE ${`%${q}%`}
     ) AND (
-      ${status} = 'all' OR COALESCE(pa.status::text, p.status::text) = ${status}
+      ${status} = 'all' OR COALESCE((
+        SELECT pa.status::text FROM payment_attempts pa
+        WHERE pa.payment_id = p.id
+        ORDER BY pa.initiated_at DESC, pa.id DESC LIMIT 1
+      ), p.status::text) = ${status}
     )
   `;
   const total = countRows[0]?.count ?? 0;
@@ -74,10 +78,18 @@ export default async function TransactionsPage({
   const page = Math.min(requestedPage, pageCount);
   const transactions = await sql<TransactionRow[]>`
     SELECT o.order_number, o.customer_name, o.customer_phone, p.amount_minor, p.provider_receipt, p.status::text AS payment_status,
-           pa.status::text AS attempt_status, pa.result_description, pa.initiated_at, pa.completed_at
+           pa.status::text AS attempt_status, pa.result_description, pa.initiated_at, pa.completed_at,
+           COALESCE(pa.attempt_count, 0)::int AS attempt_count
     FROM payments p
     JOIN orders o ON o.id = p.order_id
-    LEFT JOIN payment_attempts pa ON pa.payment_id = p.id
+    LEFT JOIN LATERAL (
+      SELECT latest.status, latest.result_description, latest.initiated_at, latest.completed_at,
+             (SELECT COUNT(*) FROM payment_attempts WHERE payment_id = p.id)::int AS attempt_count
+      FROM payment_attempts latest
+      WHERE latest.payment_id = p.id
+      ORDER BY latest.initiated_at DESC, latest.id DESC
+      LIMIT 1
+    ) pa ON true
     WHERE (
       ${q} = '' OR o.order_number ILIKE ${`%${q}%`} OR o.customer_name ILIKE ${`%${q}%`} OR o.customer_phone ILIKE ${`%${q}%`}
     ) AND (
@@ -114,6 +126,7 @@ export default async function TransactionsPage({
           "Customer",
           "Amount",
           "Outcome",
+          "Retries",
           "Activity",
           "Provider message",
         ]}
@@ -160,6 +173,11 @@ export default async function TransactionsPage({
                 </Badge>
               ) : null}
             </div>,
+            <span className="text-sm text-gray-600" key="retries">
+              {transaction.attempt_count > 1
+                ? `${transaction.attempt_count - 1} ${transaction.attempt_count === 2 ? "retry" : "retries"}`
+                : "—"}
+            </span>,
             <div className="space-y-1 text-xs leading-4" key="activity">
               <p>
                 <span className="text-gray-400">Started: </span>
