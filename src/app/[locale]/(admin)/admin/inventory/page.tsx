@@ -1,18 +1,133 @@
-import InventoryIntakeDialog from "@/components/admin/InventoryIntakeDialog";
-import Input from "@/components/form/input/InputField";
-import BasicTableOne from "@/components/tables/BasicTableOne";
-import Badge from "@/components/ui/badge/Badge";
-import Button from "@/components/ui/button/Button";
+import InventoryCatalog from "@/components/admin/InventoryCatalog";
 import { sql } from "@/server/db";
-import { updateInventory } from "../actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function InventoryPage({ searchParams }: { searchParams: Promise<{ q?: string; health?: string }> }) {
-  const { q = "", health = "all" } = await searchParams; const query = q.trim();
-  const [items, availableVariants] = await Promise.all([
-    sql<{ variant_id: string; name: string; label: string; sku: string; on_hand_quantity: number; reserved_quantity: number; available: number; low_stock_threshold: number }[]>`SELECT v.id AS variant_id,p.name,v.label,v.sku,i.on_hand_quantity,i.reserved_quantity,(i.on_hand_quantity-i.reserved_quantity)::int AS available,i.low_stock_threshold FROM inventory i JOIN product_variants v ON v.id=i.variant_id JOIN products p ON p.id=v.product_id WHERE (${query}='' OR p.name ILIKE ${`%${query}%`} OR v.sku ILIKE ${`%${query}%`} OR v.label ILIKE ${`%${query}%`}) AND (${health}='all' OR (${health}='out' AND i.on_hand_quantity-i.reserved_quantity<=0) OR (${health}='low' AND i.on_hand_quantity-i.reserved_quantity>0 AND i.on_hand_quantity-i.reserved_quantity<=i.low_stock_threshold) OR (${health}='healthy' AND i.on_hand_quantity-i.reserved_quantity>i.low_stock_threshold)) ORDER BY available,p.name`,
-    sql<{ id: string; name: string; label: string; sku: string }[]>`SELECT v.id,p.name,v.label,v.sku FROM product_variants v JOIN products p ON p.id=v.product_id LEFT JOIN inventory i ON i.variant_id=v.id WHERE i.variant_id IS NULL ORDER BY p.name,v.label`,
+const pageSize = 10;
+
+type InventoryItem = {
+  variant_id: string;
+  product_id: string;
+  name: string;
+  label: string;
+  sku: string;
+  on_hand_quantity: number;
+  reserved_quantity: number;
+  available: number;
+  low_stock_threshold: number;
+};
+
+type CatalogueProduct = {
+  id: string;
+  name: string;
+  variants: {
+    id: string;
+    label: string;
+    sku: string;
+    inInventory: boolean;
+  }[];
+};
+
+export default async function InventoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; health?: string; page?: string }>;
+}) {
+  const input = await searchParams;
+  const q = (input.q ?? "").trim();
+  const health = ["all", "healthy", "low", "out"].includes(input.health ?? "")
+    ? (input.health ?? "all")
+    : "all";
+  const requestedPage = Math.max(
+    1,
+    Number.parseInt(input.page ?? "1", 10) || 1,
+  );
+  const [countRows, catalogueRows] = await Promise.all([
+    sql<{ count: number }[]>`
+      SELECT COUNT(*)::int AS count
+      FROM inventory i
+      JOIN product_variants v ON v.id = i.variant_id
+      JOIN products p ON p.id = v.product_id
+      WHERE (${q} = '' OR p.name ILIKE ${`%${q}%`} OR v.sku ILIKE ${`%${q}%`} OR v.label ILIKE ${`%${q}%`})
+        AND (${health} = 'all'
+          OR (${health} = 'out' AND i.on_hand_quantity - i.reserved_quantity <= 0)
+          OR (${health} = 'low' AND i.on_hand_quantity - i.reserved_quantity > 0 AND i.on_hand_quantity - i.reserved_quantity <= i.low_stock_threshold)
+          OR (${health} = 'healthy' AND i.on_hand_quantity - i.reserved_quantity > i.low_stock_threshold))
+    `,
+    sql<
+      {
+        product_id: string;
+        name: string;
+        variant_id: string;
+        label: string;
+        sku: string;
+        in_inventory: boolean;
+      }[]
+    >`
+      SELECT p.id AS product_id,p.name,v.id AS variant_id,v.label,v.sku,(i.variant_id IS NOT NULL) AS in_inventory
+      FROM products p
+      JOIN product_variants v ON v.product_id = p.id
+      LEFT JOIN inventory i ON i.variant_id = v.id
+      WHERE p.active AND v.active
+      ORDER BY p.name,v.label
+    `,
   ]);
-  return <BasicTableOne title="Inventory" description="Search catalogue stock, see reservations, and update physical quantities without leaving the table." actions={<><form className="flex flex-wrap gap-2"><Input aria-label="Search inventory" className="min-w-56" defaultValue={query} name="q" placeholder="Search product or SKU" /><select name="health" defaultValue={health} className="h-11 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"><option value="all">All stock</option><option value="healthy">Healthy</option><option value="low">Low stock</option><option value="out">Out of stock</option></select><Button type="submit" size="sm" variant="outline">Search & filter</Button></form><InventoryIntakeDialog variants={availableVariants} /></>} columns={["Product", "Variant / SKU", "Reserved", "Available", "On hand", "Health", "Action"]} empty="No inventory matches this search." rows={items.map((item) => [<span key="n" className="font-medium text-gray-800 dark:text-white/90">{item.name}</span>, <span key="v"><span className="block text-gray-800 dark:text-white/90">{item.label}</span><span className="text-xs text-gray-400">{item.sku}</span></span>, item.reserved_quantity, item.available, <form id={`stock-${item.variant_id}`} key="oh" action={updateInventory.bind(null,item.variant_id)}><Input aria-label={`On hand for ${item.name} ${item.label}`} className="h-10 w-24 px-2" defaultValue={item.on_hand_quantity} min={item.reserved_quantity} name="onHand" type="number" /></form>, <Badge key="h" size="sm" color={item.available<=0?"error":item.available<=item.low_stock_threshold?"warning":"success"}>{item.available<=0?"Out of stock":item.available<=item.low_stock_threshold?"Low stock":"Healthy"}</Badge>, <Button key="a" form={`stock-${item.variant_id}`} type="submit" size="sm" variant="outline">Update</Button>])} />;
+  const total = countRows[0]?.count ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(requestedPage, pageCount);
+  const items = await sql<InventoryItem[]>`
+    SELECT v.id AS variant_id,p.id AS product_id,p.name,v.label,v.sku,i.on_hand_quantity,i.reserved_quantity,
+           (i.on_hand_quantity - i.reserved_quantity)::int AS available,i.low_stock_threshold
+    FROM inventory i
+    JOIN product_variants v ON v.id = i.variant_id
+    JOIN products p ON p.id = v.product_id
+    WHERE (${q} = '' OR p.name ILIKE ${`%${q}%`} OR v.sku ILIKE ${`%${q}%`} OR v.label ILIKE ${`%${q}%`})
+      AND (${health} = 'all'
+        OR (${health} = 'out' AND i.on_hand_quantity - i.reserved_quantity <= 0)
+        OR (${health} = 'low' AND i.on_hand_quantity - i.reserved_quantity > 0 AND i.on_hand_quantity - i.reserved_quantity <= i.low_stock_threshold)
+        OR (${health} = 'healthy' AND i.on_hand_quantity - i.reserved_quantity > i.low_stock_threshold))
+    ORDER BY available,p.name,v.label
+    LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+  `;
+  const catalogue = Array.from(
+    catalogueRows
+      .reduce((products, row) => {
+        const product = products.get(row.product_id) ?? {
+          id: row.product_id,
+          name: row.name,
+          variants: [],
+        };
+        product.variants.push({
+          id: row.variant_id,
+          label: row.label,
+          sku: row.sku,
+          inInventory: row.in_inventory,
+        });
+        products.set(row.product_id, product);
+        return products;
+      }, new Map<string, CatalogueProduct>())
+      .values(),
+  );
+
+  return (
+    <InventoryCatalog
+      items={items.map((item) => ({
+        variantId: item.variant_id,
+        productId: item.product_id,
+        name: item.name,
+        label: item.label,
+        sku: item.sku,
+        inStock: item.on_hand_quantity,
+        reserved: item.reserved_quantity,
+        available: item.available,
+        lowStockThreshold: item.low_stock_threshold,
+      }))}
+      catalogue={catalogue}
+      health={health}
+      page={page}
+      pageCount={pageCount}
+      total={total}
+      pageSize={pageSize}
+    />
+  );
 }
