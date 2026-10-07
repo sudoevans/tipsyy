@@ -1,0 +1,7 @@
+import Input from "@/components/form/input/InputField";
+import BasicTableOne from "@/components/tables/BasicTableOne";
+import Button from "@/components/ui/button/Button";
+import { sql } from "@/server/db";
+
+export const dynamic="force-dynamic";
+export default async function AuditPage({searchParams}:{searchParams:Promise<{q?:string}>}){const {q=""}=await searchParams;const logs=await sql<{display_name:string|null;username:string|null;action:string;entity_type:string;entity_id:string|null;metadata:unknown;created_at:Date}[]>`SELECT u.display_name,u.username,l.action,l.entity_type,l.entity_id,l.metadata,l.created_at FROM admin_activity_logs l LEFT JOIN users u ON u.id=l.actor_user_id WHERE (${q}='' OR l.action ILIKE ${`%${q}%`} OR l.entity_type ILIKE ${`%${q}%`} OR u.username ILIKE ${`%${q}%`}) ORDER BY l.created_at DESC LIMIT 250`;return <BasicTableOne title="Activity logs & audit trail" description="A searchable record of administrative changes." actions={<form className="flex gap-2"><Input name="q" defaultValue={q} placeholder="Search actions"/><Button type="submit" size="sm" variant="outline">Search</Button></form>} columns={["When","Staff","Action","Entity","Record","Details"]} empty="Administrative changes will be recorded here." rows={logs.map(l=>[l.created_at.toLocaleString('en-KE'),l.display_name??l.username??"System",l.action.replaceAll('.',' '),l.entity_type,l.entity_id??"—",<span key="m" className="max-w-72 truncate text-xs">{JSON.stringify(l.metadata)}</span>])}/>}

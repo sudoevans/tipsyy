@@ -1,0 +1,16 @@
+import ProductCatalog from "@/components/admin/ProductCatalog";
+import { sql } from "@/server/db";
+export const dynamic = "force-dynamic";
+const pageSize = 12;
+export default async function ProductsPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; category?: string; brand?: string; sort?: string; direction?: string; page?: string }> }) {
+  const input = await searchParams; const q = (input.q ?? "").trim(); const status = ["all", "active", "hidden"].includes(input.status ?? "") ? input.status ?? "all" : "all"; const category = input.category ?? "all"; const brand = input.brand ?? "all"; const sort = ["name", "category", "brand", "created"].includes(input.sort ?? "") ? input.sort ?? "created" : "created"; const direction = input.direction === "asc" ? "asc" : "desc"; const page = Math.max(1, Number.parseInt(input.page ?? "1", 10) || 1);
+  const orderBy = { name: "p.name", category: "c.name", brand: "b.name", created: "p.created_at" }[sort] ?? "p.created_at";
+  const [countRows, products, categories, brands] = await Promise.all([
+    sql<{ count: number }[]>`SELECT COUNT(*)::int AS count FROM products p JOIN categories c ON c.id=p.category_id LEFT JOIN brands b ON b.id=p.brand_id WHERE (${q}='' OR p.name ILIKE ${`%${q}%`} OR b.name ILIKE ${`%${q}%`} OR EXISTS (SELECT 1 FROM product_variants sv WHERE sv.product_id=p.id AND (sv.label ILIKE ${`%${q}%`} OR sv.sku ILIKE ${`%${q}%`}))) AND (${status}='all' OR (${status}='active' AND p.active) OR (${status}='hidden' AND NOT p.active)) AND (${category}='all' OR c.slug=${category}) AND (${brand}='all' OR p.brand_id::text=${brand})`,
+    sql<{ id: string; name: string; category: string; brand: string | null; variant_count: number; active: boolean; image_url: string | null; created_at: Date }[]>`SELECT p.id,p.name,c.name AS category,b.name AS brand,COUNT(v.id)::int AS variant_count,p.active,p.image_url,p.created_at FROM products p JOIN categories c ON c.id=p.category_id LEFT JOIN brands b ON b.id=p.brand_id LEFT JOIN product_variants v ON v.product_id=p.id WHERE (${q}='' OR p.name ILIKE ${`%${q}%`} OR b.name ILIKE ${`%${q}%`} OR v.label ILIKE ${`%${q}%`} OR v.sku ILIKE ${`%${q}%`}) AND (${status}='all' OR (${status}='active' AND p.active) OR (${status}='hidden' AND NOT p.active)) AND (${category}='all' OR c.slug=${category}) AND (${brand}='all' OR p.brand_id::text=${brand}) GROUP BY p.id,c.name,b.name ORDER BY ${sql.unsafe(orderBy)} ${sql.unsafe(direction.toUpperCase())},p.id LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
+    sql<{ id: string; slug: string; name: string }[]>`SELECT id,slug,name FROM categories WHERE active=true ORDER BY sort_order,name`,
+    sql<{ id: string; name: string }[]>`SELECT id,name FROM brands WHERE active=true ORDER BY name`,
+  ]);
+  const total = countRows[0]?.count ?? 0; const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  return <ProductCatalog products={products.map((product) => ({ id: product.id, name: product.name, category: product.category, brand: product.brand, variantCount: product.variant_count, active: product.active, imageUrl: product.image_url, createdAt: product.created_at.toISOString() }))} categories={categories} brands={brands} page={Math.min(page, pageCount)} pageCount={pageCount} total={total} />;
+}

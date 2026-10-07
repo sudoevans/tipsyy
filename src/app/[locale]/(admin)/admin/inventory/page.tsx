@@ -1,0 +1,18 @@
+import InventoryIntakeDialog from "@/components/admin/InventoryIntakeDialog";
+import Input from "@/components/form/input/InputField";
+import BasicTableOne from "@/components/tables/BasicTableOne";
+import Badge from "@/components/ui/badge/Badge";
+import Button from "@/components/ui/button/Button";
+import { sql } from "@/server/db";
+import { updateInventory } from "../actions";
+
+export const dynamic = "force-dynamic";
+
+export default async function InventoryPage({ searchParams }: { searchParams: Promise<{ q?: string; health?: string }> }) {
+  const { q = "", health = "all" } = await searchParams; const query = q.trim();
+  const [items, availableVariants] = await Promise.all([
+    sql<{ variant_id: string; name: string; label: string; sku: string; on_hand_quantity: number; reserved_quantity: number; available: number; low_stock_threshold: number }[]>`SELECT v.id AS variant_id,p.name,v.label,v.sku,i.on_hand_quantity,i.reserved_quantity,(i.on_hand_quantity-i.reserved_quantity)::int AS available,i.low_stock_threshold FROM inventory i JOIN product_variants v ON v.id=i.variant_id JOIN products p ON p.id=v.product_id WHERE (${query}='' OR p.name ILIKE ${`%${query}%`} OR v.sku ILIKE ${`%${query}%`} OR v.label ILIKE ${`%${query}%`}) AND (${health}='all' OR (${health}='out' AND i.on_hand_quantity-i.reserved_quantity<=0) OR (${health}='low' AND i.on_hand_quantity-i.reserved_quantity>0 AND i.on_hand_quantity-i.reserved_quantity<=i.low_stock_threshold) OR (${health}='healthy' AND i.on_hand_quantity-i.reserved_quantity>i.low_stock_threshold)) ORDER BY available,p.name`,
+    sql<{ id: string; name: string; label: string; sku: string }[]>`SELECT v.id,p.name,v.label,v.sku FROM product_variants v JOIN products p ON p.id=v.product_id LEFT JOIN inventory i ON i.variant_id=v.id WHERE i.variant_id IS NULL ORDER BY p.name,v.label`,
+  ]);
+  return <BasicTableOne title="Inventory" description="Search catalogue stock, see reservations, and update physical quantities without leaving the table." actions={<><form className="flex flex-wrap gap-2"><Input aria-label="Search inventory" className="min-w-56" defaultValue={query} name="q" placeholder="Search product or SKU" /><select name="health" defaultValue={health} className="h-11 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"><option value="all">All stock</option><option value="healthy">Healthy</option><option value="low">Low stock</option><option value="out">Out of stock</option></select><Button type="submit" size="sm" variant="outline">Search & filter</Button></form><InventoryIntakeDialog variants={availableVariants} /></>} columns={["Product", "Variant / SKU", "Reserved", "Available", "On hand", "Health", "Action"]} empty="No inventory matches this search." rows={items.map((item) => [<span key="n" className="font-medium text-gray-800 dark:text-white/90">{item.name}</span>, <span key="v"><span className="block text-gray-800 dark:text-white/90">{item.label}</span><span className="text-xs text-gray-400">{item.sku}</span></span>, item.reserved_quantity, item.available, <form id={`stock-${item.variant_id}`} key="oh" action={updateInventory.bind(null,item.variant_id)}><Input aria-label={`On hand for ${item.name} ${item.label}`} className="h-10 w-24 px-2" defaultValue={item.on_hand_quantity} min={item.reserved_quantity} name="onHand" type="number" /></form>, <Badge key="h" size="sm" color={item.available<=0?"error":item.available<=item.low_stock_threshold?"warning":"success"}>{item.available<=0?"Out of stock":item.available<=item.low_stock_threshold?"Low stock":"Healthy"}</Badge>, <Button key="a" form={`stock-${item.variant_id}`} type="submit" size="sm" variant="outline">Update</Button>])} />;
+}
