@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  CalendarIcon,
   ChartBreakoutSquareIcon,
   CheckCircleIcon,
   Copy01Icon,
@@ -78,11 +77,28 @@ type PayoutSummary = {
   periodEnd: string;
 };
 
+type PendingPayment = {
+  riderId: string;
+  riderName: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: number;
+  deliveryCount: number;
+  canPay: boolean;
+  orders: {
+    orderNumber: string;
+    customerName: string;
+    payout: number;
+    deliveredAt: string;
+  }[];
+};
+
 type Props = {
   drivers: Driver[];
   deliveries: Delivery[];
   payouts: DriverPayout[];
   payoutSummary: PayoutSummary;
+  pendingPayments: PendingPayment[];
 };
 type Tab = "overview" | "drivers" | "deliveries" | "payments";
 
@@ -158,6 +174,7 @@ export default function DriverOperations({
   deliveries,
   payouts,
   payoutSummary,
+  pendingPayments,
 }: Props) {
   const { showToast } = useAdminToast();
   const router = useRouter();
@@ -174,7 +191,8 @@ export default function DriverOperations({
   const [deliveriesPage, setDeliveriesPage] = useState(1);
   const [payoutsPage, setPayoutsPage] = useState(1);
   const [activityDriver, setActivityDriver] = useState<Driver | null>(null);
-  const [payoutDriverId, setPayoutDriverId] = useState<string | null>(null);
+  const [selectedPendingPayment, setSelectedPendingPayment] =
+    useState<PendingPayment | null>(null);
   const [pending, startTransition] = useTransition();
 
   const filteredDrivers = useMemo(() => {
@@ -562,9 +580,9 @@ export default function DriverOperations({
       ) : null}
       {tab === "payments" ? (
         <DriverPayments
-          drivers={drivers}
           payouts={pagedPayouts}
           payoutSummary={payoutSummary}
+          pendingPayments={pendingPayments}
           search={payoutQuery}
           total={filteredPayouts.length}
           page={currentPayoutsPage}
@@ -574,7 +592,7 @@ export default function DriverOperations({
             setPayoutsPage(1);
           }}
           onPageChange={setPayoutsPage}
-          onRecordPayout={(driverId) => setPayoutDriverId(driverId)}
+          onPayDriver={setSelectedPendingPayment}
         />
       ) : null}
       {onboarding ? (
@@ -589,11 +607,10 @@ export default function DriverOperations({
           onClose={() => setActivityDriver(null)}
         />
       ) : null}
-      {payoutDriverId !== null ? (
+      {selectedPendingPayment ? (
         <RecordDriverPayoutDialog
-          drivers={drivers}
-          initialDriverId={payoutDriverId || undefined}
-          onClose={() => setPayoutDriverId(null)}
+          payment={selectedPendingPayment}
+          onClose={() => setSelectedPendingPayment(null)}
         />
       ) : null}
     </div>
@@ -900,243 +917,229 @@ function DriverRow({
 }
 
 function DriverPayments({
-  drivers,
   payouts,
   payoutSummary,
+  pendingPayments,
   search,
   total,
   page,
   pageCount,
   onSearch,
   onPageChange,
-  onRecordPayout,
+  onPayDriver,
 }: {
-  drivers: Driver[];
   payouts: DriverPayout[];
   payoutSummary: PayoutSummary;
+  pendingPayments: PendingPayment[];
   search: string;
   total: number;
   page: number;
   pageCount: number;
   onSearch: (value: string) => void;
   onPageChange: (page: number) => void;
-  onRecordPayout: (driverId: string) => void;
+  onPayDriver: (payment: PendingPayment) => void;
 }) {
   const [queuePage, setQueuePage] = useState(1);
-  const outstandingDrivers = [...drivers]
-    .filter((driver) => driver.earned > driver.paid)
-    .sort(
-      (left, right) => right.earned - right.paid - (left.earned - left.paid),
-    );
   const queuePageCount = Math.max(
     1,
-    Math.ceil(outstandingDrivers.length / pageSize),
+    Math.ceil(pendingPayments.length / pageSize),
   );
   const currentQueuePage = Math.min(queuePage, queuePageCount);
-  const pagedOutstandingDrivers = outstandingDrivers.slice(
+  const pagedPendingPayments = pendingPayments.slice(
     (currentQueuePage - 1) * pageSize,
     currentQueuePage * pageSize,
   );
-  const currentWeek = `${formatDateOnly(payoutSummary.periodStart)} – ${formatDateOnly(
-    payoutSummary.periodEnd,
-  )}`;
 
   return (
     <div className="space-y-5">
       <section className="rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
-              Weekly driver payments
-            </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Payouts settle completed deliveries in a closed Monday–Sunday
-              period.
-            </p>
-          </div>
-          <div className="inline-flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-sm font-medium text-gray-600 dark:bg-white/[0.03] dark:text-gray-300">
-            <CalendarIcon className="size-4 text-brand-600" />
-            Current week: {currentWeek}
-          </div>
-        </div>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <PaymentMetric
             label="Total driver earnings"
             value={money.format(payoutSummary.earned)}
-            note="All completed deliveries"
           />
           <PaymentMetric
             label="Paid to drivers"
             value={money.format(payoutSummary.paid)}
-            note="Settled in recorded payouts"
             tone="text-success-600"
           />
           <PaymentMetric
-            label="Pending balance"
+            label="Pending payments"
             value={money.format(payoutSummary.pending)}
-            note="Completed deliveries not paid"
             tone="text-warning-600"
           />
           <PaymentMetric
-            label="Current week earned"
+            label="This week"
             value={money.format(payoutSummary.currentWeekDue)}
-            note="Accrued for the active week"
           />
         </div>
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <section className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-          <div className="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
-            <h2 className="text-base font-semibold text-gray-800 dark:text-white">
-              Payment queue
-            </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Outstanding delivery earnings, ready to settle by closed week.
-            </p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[570px] text-left text-sm">
-              <thead className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02]">
-                <tr>
-                  <th className="px-5 py-3">Driver</th>
-                  <th className="px-5 py-3 text-right">Current week</th>
-                  <th className="px-5 py-3 text-right">Pending</th>
-                  <th className="px-5 py-3 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {pagedOutstandingDrivers.map((driver) => (
-                  <tr
-                    key={driver.id}
-                    className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"
-                  >
-                    <td className="px-5 py-4">
-                      <span className="block font-semibold text-gray-800 dark:text-white">
-                        {driver.name}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-gray-500">
-                        {driver.delivered} completed deliveries
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-right text-gray-600 dark:text-gray-300">
-                      {money.format(driver.currentWeekUnpaid)}
-                    </td>
-                    <td className="px-5 py-4 text-right font-semibold text-gray-800 dark:text-white">
-                      {money.format(Math.max(0, driver.earned - driver.paid))}
-                    </td>
-                    <td className="px-5 py-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => onRecordPayout(driver.id)}
-                        className="inline-flex h-9 items-center rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5"
-                      >
-                        Record payout
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!outstandingDrivers.length ? (
-            <p className="px-5 py-10 text-center text-sm text-gray-500">
-              No completed delivery earnings are awaiting payment.
-            </p>
-          ) : null}
-          <LocalPagination
-            page={currentQueuePage}
-            pageCount={queuePageCount}
-            total={outstandingDrivers.length}
-            onPageChange={setQueuePage}
-          />
-        </section>
-
-        <section className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-          <div className="flex flex-col gap-3 border-b border-gray-100 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-gray-800">
-            <div>
-              <h2 className="text-base font-semibold text-gray-800 dark:text-white">
-                Recent weekly payouts
-              </h2>
-              <p className="mt-1 text-sm text-gray-500">
-                Settlement history and the deliveries included in each payment.
-              </p>
-            </div>
-            <label className="relative block w-full sm:w-60">
-              <SearchLgIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-gray-400" />
-              <input
-                value={search}
-                onChange={(event) => onSearch(event.target.value)}
-                placeholder="Search driver or reference"
-                className="h-10 w-full rounded-lg border border-gray-300 py-2 pr-3 pl-10 text-sm outline-none focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900"
-              />
-            </label>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[700px] text-left text-sm">
-              <thead className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02]">
-                <tr>
-                  <th className="px-5 py-3">Driver</th>
-                  <th className="px-5 py-3">Week</th>
-                  <th className="px-5 py-3 text-right">Deliveries</th>
-                  <th className="px-5 py-3 text-right">Amount</th>
-                  <th className="px-5 py-3">Paid</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {payouts.map((payout) => (
-                  <tr
-                    key={payout.id}
-                    className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"
-                  >
-                    <td className="px-5 py-4">
-                      <span className="block font-semibold text-gray-800 dark:text-white">
-                        {payout.riderName}
-                      </span>
-                      <span className="font-mono mt-0.5 block text-xs text-gray-500">
-                        {payout.reference}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-gray-600 dark:text-gray-300">
-                      {formatDateOnly(payout.periodStart)} –{" "}
-                      {formatDateOnly(payout.periodEnd)}
-                    </td>
-                    <td className="px-5 py-4 text-right text-gray-600 dark:text-gray-300">
-                      {payout.deliveryCount}
-                    </td>
-                    <td className="px-5 py-4 text-right font-semibold text-gray-800 dark:text-white">
-                      {money.format(payout.amount)}
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex flex-col items-start gap-1">
-                        <Badge color={statusColor(payout.status)} size="sm">
-                          {payout.status}
-                        </Badge>
-                        <span className="text-xs whitespace-nowrap text-gray-500">
-                          {payout.paidAt
-                            ? formatDate(payout.paidAt)
-                            : "Not paid"}
+      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-gray-800">
+          <h2 className="text-base font-semibold text-gray-800 dark:text-white">
+            Pending payments
+          </h2>
+          <Badge color="warning" size="sm">
+            {pendingPayments.length} pending
+          </Badge>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-left text-sm">
+            <thead className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02]">
+              <tr>
+                <th className="px-5 py-3">Driver</th>
+                <th className="px-5 py-3">Week</th>
+                <th className="px-5 py-3">Orders</th>
+                <th className="px-5 py-3 text-right">Amount</th>
+                <th className="px-5 py-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              {pagedPendingPayments.map((payment) => (
+                <tr
+                  key={`${payment.riderId}-${payment.periodStart}`}
+                  className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"
+                >
+                  <td className="px-5 py-4 font-semibold text-gray-800 dark:text-white">
+                    {payment.riderName}
+                  </td>
+                  <td className="px-5 py-4 whitespace-nowrap text-gray-600 dark:text-gray-300">
+                    {formatDateOnly(payment.periodStart)} –{" "}
+                    {formatDateOnly(payment.periodEnd)}
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="flex max-w-72 flex-wrap gap-1.5">
+                      {payment.orders.slice(0, 2).map((order) => (
+                        <span
+                          key={order.orderNumber}
+                          className="font-mono rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300"
+                        >
+                          {order.orderNumber}
                         </span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!payouts.length ? (
-            <p className="px-5 py-10 text-center text-sm text-gray-500">
-              No weekly payouts match this search.
-            </p>
-          ) : null}
-          <LocalPagination
-            page={page}
-            pageCount={pageCount}
-            total={total}
-            onPageChange={onPageChange}
-          />
-        </section>
-      </div>
+                      ))}
+                      {payment.orders.length > 2 ? (
+                        <span className="rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500 dark:bg-white/[0.06]">
+                          +{payment.orders.length - 2}
+                        </span>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onPayDriver(payment)}
+                      className="mt-1.5 text-xs font-semibold text-brand-600 hover:text-brand-700"
+                    >
+                      View {payment.deliveryCount} order
+                      {payment.deliveryCount === 1 ? "" : "s"}
+                    </button>
+                  </td>
+                  <td className="px-5 py-4 text-right font-semibold text-gray-800 dark:text-white">
+                    {money.format(payment.amount)}
+                  </td>
+                  <td className="px-5 py-4 text-right">
+                    <button
+                      type="button"
+                      onClick={() => onPayDriver(payment)}
+                      className="inline-flex h-9 items-center rounded-lg bg-brand-500 px-3 text-xs font-semibold text-white transition hover:bg-brand-600"
+                    >
+                      {payment.canPay ? "Pay driver" : "View orders"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!pendingPayments.length ? (
+          <p className="px-5 py-10 text-center text-sm text-gray-500">
+            No pending payments.
+          </p>
+        ) : null}
+        <LocalPagination
+          page={currentQueuePage}
+          pageCount={queuePageCount}
+          total={pendingPayments.length}
+          onPageChange={setQueuePage}
+        />
+      </section>
+
+      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+        <div className="flex flex-col gap-3 border-b border-gray-100 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-gray-800">
+          <h2 className="text-base font-semibold text-gray-800 dark:text-white">
+            Payment history
+          </h2>
+          <label className="relative block w-full sm:w-60">
+            <SearchLgIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-gray-400" />
+            <input
+              value={search}
+              onChange={(event) => onSearch(event.target.value)}
+              placeholder="Search driver or reference"
+              className="h-10 w-full rounded-lg border border-gray-300 py-2 pr-3 pl-10 text-sm outline-none focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900"
+            />
+          </label>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[700px] text-left text-sm">
+            <thead className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02]">
+              <tr>
+                <th className="px-5 py-3">Driver</th>
+                <th className="px-5 py-3">Week</th>
+                <th className="px-5 py-3 text-right">Orders</th>
+                <th className="px-5 py-3 text-right">Amount</th>
+                <th className="px-5 py-3">Paid</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              {payouts.map((payout) => (
+                <tr
+                  key={payout.id}
+                  className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"
+                >
+                  <td className="px-5 py-4">
+                    <span className="block font-semibold text-gray-800 dark:text-white">
+                      {payout.riderName}
+                    </span>
+                    <span className="font-mono mt-0.5 block text-xs text-gray-500">
+                      {payout.reference}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4 text-gray-600 dark:text-gray-300">
+                    {formatDateOnly(payout.periodStart)} –{" "}
+                    {formatDateOnly(payout.periodEnd)}
+                  </td>
+                  <td className="px-5 py-4 text-right text-gray-600 dark:text-gray-300">
+                    {payout.deliveryCount}
+                  </td>
+                  <td className="px-5 py-4 text-right font-semibold text-gray-800 dark:text-white">
+                    {money.format(payout.amount)}
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="flex flex-col items-start gap-1">
+                      <Badge color={statusColor(payout.status)} size="sm">
+                        {payout.status}
+                      </Badge>
+                      <span className="text-xs whitespace-nowrap text-gray-500">
+                        {payout.paidAt ? formatDate(payout.paidAt) : "Not paid"}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!payouts.length ? (
+          <p className="px-5 py-10 text-center text-sm text-gray-500">
+            No payments found.
+          </p>
+        ) : null}
+        <LocalPagination
+          page={page}
+          pageCount={pageCount}
+          total={total}
+          onPageChange={onPageChange}
+        />
+      </section>
     </div>
   );
 }
@@ -1144,12 +1147,10 @@ function DriverPayments({
 function PaymentMetric({
   label,
   value,
-  note,
   tone = "text-gray-800 dark:text-white",
 }: {
   label: string;
   value: string;
-  note: string;
   tone?: string;
 }) {
   return (
@@ -1158,35 +1159,28 @@ function PaymentMetric({
       <p className={`mt-2 text-xl font-semibold tracking-tight ${tone}`}>
         {value}
       </p>
-      <p className="mt-1 text-xs text-gray-500">{note}</p>
     </article>
   );
 }
 
 function RecordDriverPayoutDialog({
-  drivers,
-  initialDriverId,
+  payment,
   onClose,
 }: {
-  drivers: Driver[];
-  initialDriverId?: string;
+  payment: PendingPayment;
   onClose: () => void;
 }) {
   const { showToast } = useAdminToast();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [driverId, setDriverId] = useState(
-    initialDriverId ?? drivers[0]?.id ?? "",
-  );
-  const completedWeek = lastClosedWeek();
   const submit = (form: HTMLFormElement) =>
     startTransition(async () => {
       try {
         const result = await recordDriverPayout(new FormData(form));
         router.refresh();
         showToast({
-          title: "Weekly payout recorded",
-          description: `${result.count} completed deliveries settled for ${money.format(result.amount)}.`,
+          title: "Payment recorded",
+          description: `${result.count} orders paid for ${money.format(result.amount)}.`,
           tone: "success",
         });
         onClose();
@@ -1222,11 +1216,11 @@ function RecordDriverPayoutDialog({
               id="record-driver-payout-title"
               className="text-lg font-semibold text-gray-800 dark:text-white"
             >
-              Record weekly payout
+              {payment.canPay ? "Record payment" : "Pending payment"}
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              The final amount is calculated from unpaid, completed deliveries
-              in this closed week.
+              {payment.riderName} · {formatDateOnly(payment.periodStart)} –{" "}
+              {formatDateOnly(payment.periodEnd)}
             </p>
           </div>
           <button
@@ -1238,55 +1232,75 @@ function RecordDriverPayoutDialog({
             <XCloseIcon className="size-5" />
           </button>
         </div>
-        <div className="grid gap-4 p-5 sm:grid-cols-2">
-          <Field label="Driver">
-            <div className="mt-1.5">
-              <AdminSelect
-                key={driverId}
-                name="riderId"
-                value={driverId}
-                onValueChange={setDriverId}
-                placeholder="Select a driver"
-                searchable
-                options={drivers.map((driver) => ({
-                  value: driver.id,
-                  label: `${driver.name} · ${driver.phone || "No phone"}`,
-                }))}
+        <input name="riderId" type="hidden" value={payment.riderId} />
+        <input
+          name="periodStart"
+          type="hidden"
+          value={payment.periodStart.slice(0, 10)}
+        />
+        <input
+          name="periodEnd"
+          type="hidden"
+          value={payment.periodEnd.slice(0, 10)}
+        />
+        <div className="grid gap-3 p-5 sm:grid-cols-[1fr_auto]">
+          <div className="rounded-lg bg-gray-50 px-4 py-3 dark:bg-white/[0.03]">
+            <p className="text-xs font-medium text-gray-500">Orders</p>
+            <p className="mt-1 text-lg font-semibold text-gray-800 dark:text-white">
+              {payment.deliveryCount}
+            </p>
+          </div>
+          <div className="rounded-lg bg-brand-50 px-4 py-3 text-right dark:bg-brand-500/10">
+            <p className="text-xs font-medium text-brand-600">Amount to pay</p>
+            <p className="mt-1 text-lg font-semibold text-gray-800 dark:text-white">
+              {money.format(payment.amount)}
+            </p>
+          </div>
+        </div>
+        <div className="mx-5 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+          <div className="max-h-64 overflow-y-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="sticky top-0 bg-gray-50 text-xs text-gray-500 dark:bg-gray-900">
+                <tr>
+                  <th className="px-4 py-3">Order</th>
+                  <th className="px-4 py-3">Delivered</th>
+                  <th className="px-4 py-3 text-right">Earnings</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {payment.orders.map((order) => (
+                  <tr key={order.orderNumber}>
+                    <td className="px-4 py-3">
+                      <span className="block font-semibold text-gray-800 dark:text-white">
+                        {order.orderNumber}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-gray-500">
+                        {order.customerName}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">
+                      {formatDate(order.deliveredAt)}
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium text-gray-800 dark:text-white">
+                      {money.format(order.payout)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {payment.canPay ? (
+          <div className="mx-5 mt-4">
+            <Field label="Reference (optional)">
+              <input
+                name="reference"
+                className="field mt-1.5 h-11"
+                placeholder="e.g. MPESA-DRIVER-1024"
               />
-            </div>
-          </Field>
-          <Field label="Reference (optional)">
-            <input
-              name="reference"
-              className="field mt-1.5 h-11"
-              placeholder="e.g. MPESA-DRIVER-1024"
-            />
-          </Field>
-          <Field label="Week starts">
-            <input
-              name="periodStart"
-              type="date"
-              required
-              defaultValue={completedWeek.start}
-              max={completedWeek.end}
-              className="field mt-1.5 h-11"
-            />
-          </Field>
-          <Field label="Week ends">
-            <input
-              name="periodEnd"
-              type="date"
-              required
-              defaultValue={completedWeek.end}
-              max={completedWeek.end}
-              className="field mt-1.5 h-11"
-            />
-          </Field>
-        </div>
-        <div className="mx-5 rounded-lg bg-gray-50 p-3 text-xs leading-5 text-gray-600 dark:bg-white/[0.03] dark:text-gray-300">
-          A payout covers exactly one Monday–Sunday period. Only deliveries
-          completed and still unpaid in the chosen week will be included.
-        </div>
+            </Field>
+          </div>
+        ) : null}
         <div className="mt-5 flex justify-end gap-2 border-t border-gray-100 p-5 dark:border-gray-800">
           <button
             type="button"
@@ -1294,15 +1308,17 @@ function RecordDriverPayoutDialog({
             disabled={pending}
             className="h-10 px-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-white/5"
           >
-            Cancel
+            {payment.canPay ? "Cancel" : "Close"}
           </button>
-          <button
-            disabled={pending || !driverId}
-            className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            <Wallet01Icon className="size-4" />
-            {pending ? "Recording…" : "Record payout"}
-          </button>
+          {payment.canPay ? (
+            <button
+              disabled={pending}
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              <Wallet01Icon className="size-4" />
+              {pending ? "Recording…" : "Record payment"}
+            </button>
+          ) : null}
         </div>
       </form>
     </div>
@@ -1630,22 +1646,4 @@ function formatDate(value: string) {
 
 function formatDateOnly(value: string) {
   return dateOnly.format(new Date(value));
-}
-
-function lastClosedWeek() {
-  const today = new Date();
-  const currentWeekStart = new Date(
-    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
-  );
-  currentWeekStart.setUTCDate(
-    currentWeekStart.getUTCDate() - ((currentWeekStart.getUTCDay() + 6) % 7),
-  );
-  const end = new Date(currentWeekStart);
-  end.setUTCDate(end.getUTCDate() - 1);
-  const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - 6);
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
-  };
 }

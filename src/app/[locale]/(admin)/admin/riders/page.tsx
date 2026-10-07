@@ -42,6 +42,25 @@ type PayoutSummaryRow = {
   period_end: Date;
 };
 
+type PendingPaymentRow = {
+  rider_id: string;
+  rider_name: string | null;
+  period_start: Date;
+  period_end: Date;
+  amount_minor: number;
+  delivery_count: number;
+  can_pay: boolean;
+};
+
+type PendingPaymentOrderRow = {
+  rider_id: string;
+  period_start: Date;
+  order_number: string;
+  customer_name: string;
+  payout_minor: number;
+  delivered_at: Date;
+};
+
 type DeliveryRow = {
   id: string;
   rider_id: string;
@@ -59,7 +78,14 @@ type DeliveryRow = {
 };
 
 export default async function RidersPage() {
-  const [drivers, deliveries, payouts, [payoutSummary]] = await Promise.all([
+  const [
+    drivers,
+    deliveries,
+    payouts,
+    [payoutSummary],
+    pendingPayments,
+    pendingPaymentOrders,
+  ] = await Promise.all([
     sql<DriverRow[]>`
       SELECT r.id,u.display_name,u.phone,u.status::text AS user_status,r.availability::text,
              r.vehicle_type,r.vehicle_registration,
@@ -119,7 +145,44 @@ export default async function RidersPage() {
         (date_trunc('week', CURRENT_DATE)::date + 6) AS period_end
       FROM delivery_assignments
     `,
+    sql<PendingPaymentRow[]>`
+      SELECT da.rider_id,u.display_name AS rider_name,
+             date_trunc('week', da.delivered_at)::date AS period_start,
+             (date_trunc('week', da.delivered_at)::date + 6) AS period_end,
+             SUM(da.payout_minor)::int AS amount_minor,
+             COUNT(*)::int AS delivery_count,
+             (date_trunc('week', da.delivered_at)::date + 6) < date_trunc('week', CURRENT_DATE)::date AS can_pay
+      FROM delivery_assignments da
+      JOIN riders r ON r.id = da.rider_id
+      JOIN users u ON u.id = r.user_id
+      WHERE da.status = 'DELIVERED'
+        AND da.payout_status = 'UNPAID'
+        AND da.delivered_at IS NOT NULL
+      GROUP BY da.rider_id,u.id,date_trunc('week', da.delivered_at)::date
+      ORDER BY period_start DESC,amount_minor DESC
+    `,
+    sql<PendingPaymentOrderRow[]>`
+      SELECT da.rider_id,date_trunc('week', da.delivered_at)::date AS period_start,
+             o.order_number,o.customer_name,da.payout_minor,da.delivered_at
+      FROM delivery_assignments da
+      JOIN orders o ON o.id = da.order_id
+      WHERE da.status = 'DELIVERED'
+        AND da.payout_status = 'UNPAID'
+        AND da.delivered_at IS NOT NULL
+      ORDER BY da.delivered_at DESC
+    `,
   ]);
+
+  const orderKey = (riderId: string, periodStart: Date | string) =>
+    `${riderId}:${new Date(periodStart).toISOString().slice(0, 10)}`;
+  const ordersByPendingPayment = new Map<string, PendingPaymentOrderRow[]>();
+  for (const order of pendingPaymentOrders) {
+    const key = orderKey(order.rider_id, order.period_start);
+    ordersByPendingPayment.set(key, [
+      ...(ordersByPendingPayment.get(key) ?? []),
+      order,
+    ]);
+  }
 
   return (
     <DriverOperations
@@ -175,6 +238,25 @@ export default async function RidersPage() {
         periodStart: payoutSummary.period_start.toISOString(),
         periodEnd: payoutSummary.period_end.toISOString(),
       }}
+      pendingPayments={pendingPayments.map((payment) => ({
+        riderId: payment.rider_id,
+        riderName: payment.rider_name ?? "Unnamed driver",
+        periodStart: payment.period_start.toISOString(),
+        periodEnd: payment.period_end.toISOString(),
+        amount: payment.amount_minor,
+        deliveryCount: payment.delivery_count,
+        canPay: payment.can_pay,
+        orders: (
+          ordersByPendingPayment.get(
+            orderKey(payment.rider_id, payment.period_start),
+          ) ?? []
+        ).map((order) => ({
+          orderNumber: order.order_number,
+          customerName: order.customer_name,
+          payout: order.payout_minor,
+          deliveredAt: order.delivered_at.toISOString(),
+        })),
+      }))}
     />
   );
 }

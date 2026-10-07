@@ -555,7 +555,7 @@ export async function recordDriverPayout(formData: FormData) {
     `;
     if (!assignments.length) {
       throw new Error(
-        "This driver has no unpaid completed deliveries in that week.",
+        "This payment has already been settled. Refresh the payment queue and try again.",
       );
     }
     const amount = assignments.reduce(
