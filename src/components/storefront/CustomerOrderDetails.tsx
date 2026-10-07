@@ -1,0 +1,20 @@
+"use client";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { formatPrice } from "./currency";
+
+export default function CustomerOrderDetails({ orderNumber }: { orderNumber: string }) {
+  const [state, setState] = useState<{ loading: boolean; error: string; order: Record<string, unknown> | null }>({ loading: true, error: "", order: null });
+  useEffect(() => {
+    let active = true;
+    const load = () => void fetch(`/api/v1/account/orders/${encodeURIComponent(orderNumber)}`, { cache: "no-store" }).then((response) => response.json().then((payload) => ({ response, payload }))).then(({ response, payload }) => {
+      if (!response.ok) throw new Error(payload.error?.message ?? "Could not load order.");
+      if (active) setState({ loading: false, error: "", order: payload.data });
+    }).catch(() => active && setState((current) => ({ loading: false, error: "We couldn’t refresh this order just now.", order: current.order })));
+    load(); const timer = window.setInterval(load, 15_000); return () => { active = false; window.clearInterval(timer); };
+  }, [orderNumber]);
+  if (state.loading) return <main aria-busy="true" aria-label="Loading order" className="min-h-screen bg-tipsy-canvas px-4 py-8"><div className="mx-auto max-w-3xl"><div className="h-5 w-28 animate-pulse rounded bg-tipsy-surface" /><div className="mt-5 rounded-2xl bg-white p-5 sm:p-7"><div className="flex justify-between gap-5"><div><div className="h-4 w-28 animate-pulse rounded bg-tipsy-surface" /><div className="mt-3 h-8 w-44 animate-pulse rounded bg-tipsy-surface" /></div><div className="h-7 w-24 animate-pulse rounded bg-tipsy-surface" /></div><div className="mt-7 grid gap-3">{Array.from({ length: 3 }, (_, index) => <div className="h-16 animate-pulse rounded-xl bg-tipsy-surface" key={index} />)}</div></div></div></main>;
+  if (!state.order) return <main className="grid min-h-screen place-items-center bg-tipsy-canvas p-4 text-center text-tipsy-ink"><div><h1 className="text-xl font-semibold">We couldn’t load this order</h1><p className="mt-2 text-sm text-tipsy-muted">Please try again in a moment.</p><Link className="mt-5 inline-flex h-11 items-center rounded-xl bg-tipsy-amber-500 px-5 text-sm font-semibold" href="/orders">Back to orders</Link></div></main>;
+  const order = state.order; const items = order.items as Array<Record<string, unknown>>; const events = order.events as Array<Record<string, unknown>>;
+  return <main className="min-h-screen bg-tipsy-canvas px-4 py-8 text-tipsy-ink"><div className="mx-auto max-w-3xl"><Link className="text-sm text-tipsy-muted" href="/orders">← Back to orders</Link>{state.error ? <div className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-tipsy-amber-50 px-4 py-3 text-sm text-tipsy-ink"><span>{state.error}</span><span className="shrink-0 text-xs font-semibold">Showing the latest details</span></div> : null}<div className="mt-5 rounded-2xl bg-white p-5 sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-sm text-tipsy-muted">Order #{String(order.order_number)}</p><h1 className="mt-1 text-2xl font-semibold">{String(order.status).replaceAll("_", " ")}</h1></div><strong className="text-xl">{formatPrice(Number(order.total_minor))}</strong></div><div className="mt-6 grid gap-3">{items.map((item, index) => <div className="flex justify-between rounded-xl bg-tipsy-surface p-3 text-sm" key={index}><span>{String(item.quantity)} × {String(item.product_name)}</span><strong>{formatPrice(Number(item.line_total_minor))}</strong></div>)}</div><h2 className="mt-7 text-lg font-semibold">Tracking</h2><ol className="mt-4 grid gap-4 border-l-2 border-tipsy-line pl-5">{events.map((event, index) => <li key={index}><strong className="text-sm">{String(event.to_status).replaceAll("_", " ")}</strong><p className="mt-1 text-xs text-tipsy-muted">{String(event.note ?? "Order updated")}</p></li>)}</ol></div></div></main>;
+}
