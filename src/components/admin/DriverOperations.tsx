@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  CalendarIcon,
   ChartBreakoutSquareIcon,
   CheckCircleIcon,
   Copy01Icon,
@@ -16,6 +17,7 @@ import { type ReactNode, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   createRider,
+  recordDriverPayout,
   setRiderStatus,
 } from "@/app/[locale]/(admin)/admin/actions";
 import { useAdminToast } from "@/components/admin/AdminToast";
@@ -35,6 +37,7 @@ type Driver = {
   cancelled: number;
   earned: number;
   paid: number;
+  currentWeekUnpaid: number;
 };
 
 type Delivery = {
@@ -53,8 +56,35 @@ type Delivery = {
   deliveredAt: string | null;
 };
 
-type Props = { drivers: Driver[]; deliveries: Delivery[] };
-type Tab = "overview" | "drivers" | "deliveries";
+type DriverPayout = {
+  id: string;
+  riderId: string;
+  riderName: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: number;
+  status: string;
+  reference: string;
+  paidAt: string | null;
+  deliveryCount: number;
+};
+
+type PayoutSummary = {
+  earned: number;
+  paid: number;
+  pending: number;
+  currentWeekDue: number;
+  periodStart: string;
+  periodEnd: string;
+};
+
+type Props = {
+  drivers: Driver[];
+  deliveries: Delivery[];
+  payouts: DriverPayout[];
+  payoutSummary: PayoutSummary;
+};
+type Tab = "overview" | "drivers" | "deliveries" | "payments";
 
 const money = new Intl.NumberFormat("en-KE", {
   style: "currency",
@@ -65,6 +95,7 @@ const dateTime = new Intl.DateTimeFormat("en-KE", {
   dateStyle: "medium",
   timeStyle: "short",
 });
+const dateOnly = new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" });
 const pageSize = 10;
 
 const deliveryStatuses = [
@@ -122,7 +153,12 @@ function behaviour(driver: Driver) {
   return { label: "Monitoring", tone: "text-warning-600" };
 }
 
-export default function DriverOperations({ drivers, deliveries }: Props) {
+export default function DriverOperations({
+  drivers,
+  deliveries,
+  payouts,
+  payoutSummary,
+}: Props) {
   const { showToast } = useAdminToast();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("overview");
@@ -133,9 +169,12 @@ export default function DriverOperations({ drivers, deliveries }: Props) {
   const [deliveryQuery, setDeliveryQuery] = useState("");
   const [deliveryStatus, setDeliveryStatus] = useState("all");
   const [payoutStatus, setPayoutStatus] = useState("all");
+  const [payoutQuery, setPayoutQuery] = useState("");
   const [driversPage, setDriversPage] = useState(1);
   const [deliveriesPage, setDeliveriesPage] = useState(1);
+  const [payoutsPage, setPayoutsPage] = useState(1);
   const [activityDriver, setActivityDriver] = useState<Driver | null>(null);
+  const [payoutDriverId, setPayoutDriverId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const filteredDrivers = useMemo(() => {
@@ -183,6 +222,17 @@ export default function DriverOperations({ drivers, deliveries }: Props) {
     });
   }, [deliveries, deliveryQuery, deliveryStatus, payoutStatus]);
 
+  const filteredPayouts = useMemo(() => {
+    const normalizedQuery = payoutQuery.trim().toLowerCase();
+    if (!normalizedQuery) return payouts;
+    return payouts.filter((payout) =>
+      [payout.riderName, payout.reference]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedQuery),
+    );
+  }, [payoutQuery, payouts]);
+
   const driversPageCount = Math.max(
     1,
     Math.ceil(filteredDrivers.length / pageSize),
@@ -191,8 +241,13 @@ export default function DriverOperations({ drivers, deliveries }: Props) {
     1,
     Math.ceil(filteredDeliveries.length / pageSize),
   );
+  const payoutsPageCount = Math.max(
+    1,
+    Math.ceil(filteredPayouts.length / pageSize),
+  );
   const currentDriversPage = Math.min(driversPage, driversPageCount);
   const currentDeliveriesPage = Math.min(deliveriesPage, deliveriesPageCount);
+  const currentPayoutsPage = Math.min(payoutsPage, payoutsPageCount);
   const pagedDrivers = filteredDrivers.slice(
     (currentDriversPage - 1) * pageSize,
     currentDriversPage * pageSize,
@@ -201,21 +256,14 @@ export default function DriverOperations({ drivers, deliveries }: Props) {
     (currentDeliveriesPage - 1) * pageSize,
     currentDeliveriesPage * pageSize,
   );
+  const pagedPayouts = filteredPayouts.slice(
+    (currentPayoutsPage - 1) * pageSize,
+    currentPayoutsPage * pageSize,
+  );
   const delivered = drivers.reduce(
     (total, driver) => total + driver.delivered,
     0,
   );
-  const assignments = drivers.reduce(
-    (total, driver) => total + driver.assignments,
-    0,
-  );
-  const owed = drivers.reduce(
-    (total, driver) => total + Math.max(0, driver.earned - driver.paid),
-    0,
-  );
-  const completion = assignments
-    ? Math.round((delivered / assignments) * 100)
-    : 0;
   const activeDrivers = drivers.filter(
     (driver) =>
       driver.userStatus === "ACTIVE" && driver.availability !== "OFFLINE",
@@ -277,6 +325,7 @@ export default function DriverOperations({ drivers, deliveries }: Props) {
             ["overview", "Overview"],
             ["drivers", "Drivers"],
             ["deliveries", "Deliveries"],
+            ["payments", "Payments"],
           ].map(([value, label]) => (
             <button
               type="button"
@@ -299,8 +348,8 @@ export default function DriverOperations({ drivers, deliveries }: Props) {
           drivers={drivers}
           activeDrivers={activeDrivers}
           delivered={delivered}
-          owed={owed}
-          completion={completion}
+          totalEarned={payoutSummary.earned}
+          payoutBalance={payoutSummary.pending}
           onViewDriver={(driver) => setActivityDriver(driver)}
         />
       ) : null}
@@ -511,6 +560,23 @@ export default function DriverOperations({ drivers, deliveries }: Props) {
           />
         </section>
       ) : null}
+      {tab === "payments" ? (
+        <DriverPayments
+          drivers={drivers}
+          payouts={pagedPayouts}
+          payoutSummary={payoutSummary}
+          search={payoutQuery}
+          total={filteredPayouts.length}
+          page={currentPayoutsPage}
+          pageCount={payoutsPageCount}
+          onSearch={(value) => {
+            setPayoutQuery(value);
+            setPayoutsPage(1);
+          }}
+          onPageChange={setPayoutsPage}
+          onRecordPayout={(driverId) => setPayoutDriverId(driverId)}
+        />
+      ) : null}
       {onboarding ? (
         <OnboardDriverDialog onClose={() => setOnboarding(false)} />
       ) : null}
@@ -523,6 +589,13 @@ export default function DriverOperations({ drivers, deliveries }: Props) {
           onClose={() => setActivityDriver(null)}
         />
       ) : null}
+      {payoutDriverId !== null ? (
+        <RecordDriverPayoutDialog
+          drivers={drivers}
+          initialDriverId={payoutDriverId || undefined}
+          onClose={() => setPayoutDriverId(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -531,15 +604,15 @@ function DriverOverview({
   drivers,
   activeDrivers,
   delivered,
-  owed,
-  completion,
+  totalEarned,
+  payoutBalance,
   onViewDriver,
 }: {
   drivers: Driver[];
   activeDrivers: number;
   delivered: number;
-  owed: number;
-  completion: number;
+  totalEarned: number;
+  payoutBalance: number;
   onViewDriver: (driver: Driver) => void;
 }) {
   const ranked = [...drivers]
@@ -563,16 +636,16 @@ function DriverOverview({
           tone="bg-success-50 text-success-600"
         />
         <Metric
-          icon={<ChartBreakoutSquareIcon className="size-5" />}
-          label="Delivery completion"
-          value={`${completion}%`}
-          note="Delivered ÷ assigned"
+          icon={<Wallet01Icon className="size-5" />}
+          label="Driver earnings"
+          value={money.format(totalEarned)}
+          note="Completed delivery earnings"
           tone="bg-warning-50 text-warning-600"
         />
         <Metric
           icon={<Wallet01Icon className="size-5" />}
           label="Driver payout balance"
-          value={money.format(owed)}
+          value={money.format(payoutBalance)}
           note="Delivered but unpaid"
           tone="bg-error-50 text-error-600"
         />
@@ -823,6 +896,416 @@ function DriverRow({
         </details>
       </td>
     </tr>
+  );
+}
+
+function DriverPayments({
+  drivers,
+  payouts,
+  payoutSummary,
+  search,
+  total,
+  page,
+  pageCount,
+  onSearch,
+  onPageChange,
+  onRecordPayout,
+}: {
+  drivers: Driver[];
+  payouts: DriverPayout[];
+  payoutSummary: PayoutSummary;
+  search: string;
+  total: number;
+  page: number;
+  pageCount: number;
+  onSearch: (value: string) => void;
+  onPageChange: (page: number) => void;
+  onRecordPayout: (driverId: string) => void;
+}) {
+  const [queuePage, setQueuePage] = useState(1);
+  const outstandingDrivers = [...drivers]
+    .filter((driver) => driver.earned > driver.paid)
+    .sort(
+      (left, right) => right.earned - right.paid - (left.earned - left.paid),
+    );
+  const queuePageCount = Math.max(
+    1,
+    Math.ceil(outstandingDrivers.length / pageSize),
+  );
+  const currentQueuePage = Math.min(queuePage, queuePageCount);
+  const pagedOutstandingDrivers = outstandingDrivers.slice(
+    (currentQueuePage - 1) * pageSize,
+    currentQueuePage * pageSize,
+  );
+  const currentWeek = `${formatDateOnly(payoutSummary.periodStart)} – ${formatDateOnly(
+    payoutSummary.periodEnd,
+  )}`;
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
+              Weekly driver payments
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Payouts settle completed deliveries in a closed Monday–Sunday
+              period.
+            </p>
+          </div>
+          <div className="inline-flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-sm font-medium text-gray-600 dark:bg-white/[0.03] dark:text-gray-300">
+            <CalendarIcon className="size-4 text-brand-600" />
+            Current week: {currentWeek}
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <PaymentMetric
+            label="Total driver earnings"
+            value={money.format(payoutSummary.earned)}
+            note="All completed deliveries"
+          />
+          <PaymentMetric
+            label="Paid to drivers"
+            value={money.format(payoutSummary.paid)}
+            note="Settled in recorded payouts"
+            tone="text-success-600"
+          />
+          <PaymentMetric
+            label="Pending balance"
+            value={money.format(payoutSummary.pending)}
+            note="Completed deliveries not paid"
+            tone="text-warning-600"
+          />
+          <PaymentMetric
+            label="Current week earned"
+            value={money.format(payoutSummary.currentWeekDue)}
+            note="Accrued for the active week"
+          />
+        </div>
+      </section>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <section className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
+            <h2 className="text-base font-semibold text-gray-800 dark:text-white">
+              Payment queue
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Outstanding delivery earnings, ready to settle by closed week.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[570px] text-left text-sm">
+              <thead className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02]">
+                <tr>
+                  <th className="px-5 py-3">Driver</th>
+                  <th className="px-5 py-3 text-right">Current week</th>
+                  <th className="px-5 py-3 text-right">Pending</th>
+                  <th className="px-5 py-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {pagedOutstandingDrivers.map((driver) => (
+                  <tr
+                    key={driver.id}
+                    className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"
+                  >
+                    <td className="px-5 py-4">
+                      <span className="block font-semibold text-gray-800 dark:text-white">
+                        {driver.name}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-gray-500">
+                        {driver.delivered} completed deliveries
+                      </span>
+                    </td>
+                    <td className="px-5 py-4 text-right text-gray-600 dark:text-gray-300">
+                      {money.format(driver.currentWeekUnpaid)}
+                    </td>
+                    <td className="px-5 py-4 text-right font-semibold text-gray-800 dark:text-white">
+                      {money.format(Math.max(0, driver.earned - driver.paid))}
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => onRecordPayout(driver.id)}
+                        className="inline-flex h-9 items-center rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5"
+                      >
+                        Record payout
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!outstandingDrivers.length ? (
+            <p className="px-5 py-10 text-center text-sm text-gray-500">
+              No completed delivery earnings are awaiting payment.
+            </p>
+          ) : null}
+          <LocalPagination
+            page={currentQueuePage}
+            pageCount={queuePageCount}
+            total={outstandingDrivers.length}
+            onPageChange={setQueuePage}
+          />
+        </section>
+
+        <section className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="flex flex-col gap-3 border-b border-gray-100 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-gray-800">
+            <div>
+              <h2 className="text-base font-semibold text-gray-800 dark:text-white">
+                Recent weekly payouts
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Settlement history and the deliveries included in each payment.
+              </p>
+            </div>
+            <label className="relative block w-full sm:w-60">
+              <SearchLgIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-gray-400" />
+              <input
+                value={search}
+                onChange={(event) => onSearch(event.target.value)}
+                placeholder="Search driver or reference"
+                className="h-10 w-full rounded-lg border border-gray-300 py-2 pr-3 pl-10 text-sm outline-none focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900"
+              />
+            </label>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[700px] text-left text-sm">
+              <thead className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02]">
+                <tr>
+                  <th className="px-5 py-3">Driver</th>
+                  <th className="px-5 py-3">Week</th>
+                  <th className="px-5 py-3 text-right">Deliveries</th>
+                  <th className="px-5 py-3 text-right">Amount</th>
+                  <th className="px-5 py-3">Paid</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {payouts.map((payout) => (
+                  <tr
+                    key={payout.id}
+                    className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"
+                  >
+                    <td className="px-5 py-4">
+                      <span className="block font-semibold text-gray-800 dark:text-white">
+                        {payout.riderName}
+                      </span>
+                      <span className="font-mono mt-0.5 block text-xs text-gray-500">
+                        {payout.reference}
+                      </span>
+                    </td>
+                    <td className="px-5 py-4 text-gray-600 dark:text-gray-300">
+                      {formatDateOnly(payout.periodStart)} –{" "}
+                      {formatDateOnly(payout.periodEnd)}
+                    </td>
+                    <td className="px-5 py-4 text-right text-gray-600 dark:text-gray-300">
+                      {payout.deliveryCount}
+                    </td>
+                    <td className="px-5 py-4 text-right font-semibold text-gray-800 dark:text-white">
+                      {money.format(payout.amount)}
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="flex flex-col items-start gap-1">
+                        <Badge color={statusColor(payout.status)} size="sm">
+                          {payout.status}
+                        </Badge>
+                        <span className="text-xs whitespace-nowrap text-gray-500">
+                          {payout.paidAt
+                            ? formatDate(payout.paidAt)
+                            : "Not paid"}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!payouts.length ? (
+            <p className="px-5 py-10 text-center text-sm text-gray-500">
+              No weekly payouts match this search.
+            </p>
+          ) : null}
+          <LocalPagination
+            page={page}
+            pageCount={pageCount}
+            total={total}
+            onPageChange={onPageChange}
+          />
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function PaymentMetric({
+  label,
+  value,
+  note,
+  tone = "text-gray-800 dark:text-white",
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tone?: string;
+}) {
+  return (
+    <article className="rounded-lg border border-gray-200 bg-gray-50/50 p-4 dark:border-gray-700 dark:bg-white/[0.02]">
+      <p className="text-sm font-medium text-gray-500">{label}</p>
+      <p className={`mt-2 text-xl font-semibold tracking-tight ${tone}`}>
+        {value}
+      </p>
+      <p className="mt-1 text-xs text-gray-500">{note}</p>
+    </article>
+  );
+}
+
+function RecordDriverPayoutDialog({
+  drivers,
+  initialDriverId,
+  onClose,
+}: {
+  drivers: Driver[];
+  initialDriverId?: string;
+  onClose: () => void;
+}) {
+  const { showToast } = useAdminToast();
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [driverId, setDriverId] = useState(
+    initialDriverId ?? drivers[0]?.id ?? "",
+  );
+  const completedWeek = lastClosedWeek();
+  const submit = (form: HTMLFormElement) =>
+    startTransition(async () => {
+      try {
+        const result = await recordDriverPayout(new FormData(form));
+        router.refresh();
+        showToast({
+          title: "Weekly payout recorded",
+          description: `${result.count} completed deliveries settled for ${money.format(result.amount)}.`,
+          tone: "success",
+        });
+        onClose();
+      } catch (error) {
+        showToast({
+          title: "Could not record payout",
+          description:
+            error instanceof Error
+              ? error.message
+              : "Review the payout period and try again.",
+          tone: "error",
+        });
+      }
+    });
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="record-driver-payout-title"
+      className="fixed inset-0 z-[140] flex items-end bg-gray-950/40 sm:items-center sm:justify-center sm:p-6"
+    >
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit(event.currentTarget);
+        }}
+        className="w-full max-w-xl rounded-t-2xl bg-white shadow-theme-xl sm:rounded-2xl dark:bg-gray-900"
+      >
+        <div className="flex items-start justify-between border-b border-gray-100 p-5 dark:border-gray-800">
+          <div>
+            <h2
+              id="record-driver-payout-title"
+              className="text-lg font-semibold text-gray-800 dark:text-white"
+            >
+              Record weekly payout
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              The final amount is calculated from unpaid, completed deliveries
+              in this closed week.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5"
+            aria-label="Close"
+          >
+            <XCloseIcon className="size-5" />
+          </button>
+        </div>
+        <div className="grid gap-4 p-5 sm:grid-cols-2">
+          <Field label="Driver">
+            <div className="mt-1.5">
+              <AdminSelect
+                key={driverId}
+                name="riderId"
+                value={driverId}
+                onValueChange={setDriverId}
+                placeholder="Select a driver"
+                searchable
+                options={drivers.map((driver) => ({
+                  value: driver.id,
+                  label: `${driver.name} · ${driver.phone || "No phone"}`,
+                }))}
+              />
+            </div>
+          </Field>
+          <Field label="Reference (optional)">
+            <input
+              name="reference"
+              className="field mt-1.5 h-11"
+              placeholder="e.g. MPESA-DRIVER-1024"
+            />
+          </Field>
+          <Field label="Week starts">
+            <input
+              name="periodStart"
+              type="date"
+              required
+              defaultValue={completedWeek.start}
+              max={completedWeek.end}
+              className="field mt-1.5 h-11"
+            />
+          </Field>
+          <Field label="Week ends">
+            <input
+              name="periodEnd"
+              type="date"
+              required
+              defaultValue={completedWeek.end}
+              max={completedWeek.end}
+              className="field mt-1.5 h-11"
+            />
+          </Field>
+        </div>
+        <div className="mx-5 rounded-lg bg-gray-50 p-3 text-xs leading-5 text-gray-600 dark:bg-white/[0.03] dark:text-gray-300">
+          A payout covers exactly one Monday–Sunday period. Only deliveries
+          completed and still unpaid in the chosen week will be included.
+        </div>
+        <div className="mt-5 flex justify-end gap-2 border-t border-gray-100 p-5 dark:border-gray-800">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+            className="h-10 px-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-white/5"
+          >
+            Cancel
+          </button>
+          <button
+            disabled={pending || !driverId}
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            <Wallet01Icon className="size-4" />
+            {pending ? "Recording…" : "Record payout"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -1143,4 +1626,26 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function formatDate(value: string) {
   return dateTime.format(new Date(value));
+}
+
+function formatDateOnly(value: string) {
+  return dateOnly.format(new Date(value));
+}
+
+function lastClosedWeek() {
+  const today = new Date();
+  const currentWeekStart = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
+  );
+  currentWeekStart.setUTCDate(
+    currentWeekStart.getUTCDate() - ((currentWeekStart.getUTCDay() + 6) % 7),
+  );
+  const end = new Date(currentWeekStart);
+  end.setUTCDate(end.getUTCDate() - 1);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - 6);
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
 }

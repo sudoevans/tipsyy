@@ -17,6 +17,29 @@ type DriverRow = {
   cancelled: number;
   earned_minor: number;
   paid_minor: number;
+  current_week_unpaid_minor: number;
+};
+
+type PayoutRow = {
+  id: string;
+  rider_id: string;
+  rider_name: string | null;
+  period_start: Date;
+  period_end: Date;
+  amount_minor: number;
+  status: string;
+  reference: string;
+  paid_at: Date | null;
+  delivery_count: number;
+};
+
+type PayoutSummaryRow = {
+  earned_minor: number;
+  paid_minor: number;
+  pending_minor: number;
+  current_week_due_minor: number;
+  period_start: Date;
+  period_end: Date;
 };
 
 type DeliveryRow = {
@@ -36,7 +59,7 @@ type DeliveryRow = {
 };
 
 export default async function RidersPage() {
-  const [drivers, deliveries] = await Promise.all([
+  const [drivers, deliveries, payouts, [payoutSummary]] = await Promise.all([
     sql<DriverRow[]>`
       SELECT r.id,u.display_name,u.phone,u.status::text AS user_status,r.availability::text,
              r.vehicle_type,r.vehicle_registration,
@@ -45,7 +68,13 @@ export default async function RidersPage() {
              COUNT(da.id) FILTER (WHERE da.status = 'DELIVERED')::int AS delivered,
              COUNT(da.id) FILTER (WHERE da.status IN ('DECLINED','CANCELLED'))::int AS cancelled,
              COALESCE(SUM(da.payout_minor) FILTER (WHERE da.status = 'DELIVERED'),0)::int AS earned_minor,
-             COALESCE(SUM(da.payout_minor) FILTER (WHERE da.status = 'DELIVERED' AND da.payout_status = 'PAID'),0)::int AS paid_minor
+             COALESCE(SUM(da.payout_minor) FILTER (WHERE da.status = 'DELIVERED' AND da.payout_status = 'PAID'),0)::int AS paid_minor,
+             COALESCE(SUM(da.payout_minor) FILTER (
+               WHERE da.status = 'DELIVERED'
+                 AND da.payout_status = 'UNPAID'
+                 AND da.delivered_at >= date_trunc('week', CURRENT_DATE)
+                 AND da.delivered_at < date_trunc('week', CURRENT_DATE) + INTERVAL '1 week'
+             ),0)::int AS current_week_unpaid_minor
       FROM riders r
       JOIN users u ON u.id = r.user_id
       LEFT JOIN delivery_assignments da ON da.rider_id = r.id
@@ -62,6 +91,33 @@ export default async function RidersPage() {
       JOIN users u ON u.id = r.user_id
       ORDER BY da.assigned_at DESC
       LIMIT 250
+    `,
+    sql<PayoutRow[]>`
+      SELECT dp.id,dp.rider_id,u.display_name AS rider_name,dp.period_start,dp.period_end,
+             dp.amount_minor,dp.status,dp.reference,dp.paid_at,
+             COUNT(dpi.assignment_id)::int AS delivery_count
+      FROM driver_payouts dp
+      JOIN riders r ON r.id = dp.rider_id
+      JOIN users u ON u.id = r.user_id
+      LEFT JOIN driver_payout_items dpi ON dpi.payout_id = dp.id
+      GROUP BY dp.id,u.display_name
+      ORDER BY COALESCE(dp.paid_at,dp.created_at) DESC
+      LIMIT 100
+    `,
+    sql<PayoutSummaryRow[]>`
+      SELECT
+        COALESCE(SUM(payout_minor) FILTER (WHERE status = 'DELIVERED'),0)::int AS earned_minor,
+        COALESCE(SUM(payout_minor) FILTER (WHERE status = 'DELIVERED' AND payout_status = 'PAID'),0)::int AS paid_minor,
+        COALESCE(SUM(payout_minor) FILTER (WHERE status = 'DELIVERED' AND payout_status = 'UNPAID'),0)::int AS pending_minor,
+        COALESCE(SUM(payout_minor) FILTER (
+          WHERE status = 'DELIVERED'
+            AND payout_status = 'UNPAID'
+            AND delivered_at >= date_trunc('week', CURRENT_DATE)
+            AND delivered_at < date_trunc('week', CURRENT_DATE) + INTERVAL '1 week'
+        ),0)::int AS current_week_due_minor,
+        date_trunc('week', CURRENT_DATE)::date AS period_start,
+        (date_trunc('week', CURRENT_DATE)::date + 6) AS period_end
+      FROM delivery_assignments
     `,
   ]);
 
@@ -82,6 +138,7 @@ export default async function RidersPage() {
         cancelled: driver.cancelled,
         earned: driver.earned_minor,
         paid: driver.paid_minor,
+        currentWeekUnpaid: driver.current_week_unpaid_minor,
       }))}
       deliveries={deliveries.map((delivery) => ({
         id: delivery.id,
@@ -98,6 +155,26 @@ export default async function RidersPage() {
         pickedUpAt: delivery.picked_up_at?.toISOString() ?? null,
         deliveredAt: delivery.delivered_at?.toISOString() ?? null,
       }))}
+      payouts={payouts.map((payout) => ({
+        id: payout.id,
+        riderId: payout.rider_id,
+        riderName: payout.rider_name ?? "Unnamed driver",
+        periodStart: payout.period_start.toISOString(),
+        periodEnd: payout.period_end.toISOString(),
+        amount: payout.amount_minor,
+        status: payout.status,
+        reference: payout.reference,
+        paidAt: payout.paid_at?.toISOString() ?? null,
+        deliveryCount: payout.delivery_count,
+      }))}
+      payoutSummary={{
+        earned: payoutSummary.earned_minor,
+        paid: payoutSummary.paid_minor,
+        pending: payoutSummary.pending_minor,
+        currentWeekDue: payoutSummary.current_week_due_minor,
+        periodStart: payoutSummary.period_start.toISOString(),
+        periodEnd: payoutSummary.period_end.toISOString(),
+      }}
     />
   );
 }
