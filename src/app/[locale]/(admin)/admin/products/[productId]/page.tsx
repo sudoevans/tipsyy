@@ -9,6 +9,8 @@ import Button from "@/components/ui/button/Button";
 import { Link } from "@/i18n/navigation";
 import { sql } from "@/server/db";
 import { notFound } from "next/navigation";
+
+export const dynamic = "force-dynamic";
 import { updateProduct } from "../../actions";
 
 export default async function EditProductPage({
