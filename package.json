@@ -12,8 +12,9 @@
     "db:seed": "node scripts/db-seed.mjs",
     "db:setup": "npm run db:migrate && npm run db:seed",
     "admin:create": "node scripts/admin-user.mjs",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "build:cloudflare": "opennextjs-cloudflare build && node scripts/patch-opennext-generated-worker.mjs",
+    "preview": "npm run build:cloudflare && opennextjs-cloudflare preview",
+    "deploy": "npm run build:cloudflare && opennextjs-cloudflare deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
