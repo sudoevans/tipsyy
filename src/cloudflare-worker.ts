@@ -1,3 +1,4 @@
+// @ts-ignore `.open-next/worker.js` is generated after Next's type-check completes.
 import generatedWorker from "../.open-next/worker.js";
 
 type WorkerEnvironment = {
