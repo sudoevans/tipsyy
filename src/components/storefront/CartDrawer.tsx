@@ -36,10 +36,14 @@ async function requestCartQuote(
       couponCode: code || undefined,
     }),
   });
-  const payload = await response.json();
+  const payload = (await response.json()) as {
+    data?: { deliveryFee: number; discount: number };
+    error?: { message?: string };
+  };
   if (!response.ok)
     throw new Error(payload.error?.message ?? "That promo code is not valid.");
-  return payload.data as { deliveryFee: number; discount: number };
+  if (!payload.data) throw new Error("That promo code is not valid.");
+  return payload.data;
 }
 
 export default function CartDrawer({

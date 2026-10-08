@@ -16,6 +16,9 @@
 
 # production
 /build
+/.wrangler/
+/cloudflare-env.d.ts
+/.open-next/
 
 # runtime uploads
 /public/uploads/

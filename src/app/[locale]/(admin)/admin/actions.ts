@@ -361,6 +361,7 @@ export async function updateProductImage(
       (value) =>
         value === "" ||
         value.startsWith("/uploads/products/") ||
+        value.startsWith("/api/v1/product-images/products/") ||
         /^https?:\/\//i.test(value),
       "Invalid product image URL",
     )

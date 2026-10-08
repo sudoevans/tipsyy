@@ -26,7 +26,7 @@ export default function PromoHero({ onShop }: PromoHeroProps) {
 
   useEffect(() => {
     let active = true;
-    void fetch("/api/v1/content/home", { cache: "no-store" }).then((response) => response.json()).then((payload) => {
+    void fetch("/api/v1/content/home", { cache: "no-store" }).then((response) => response.json() as Promise<{ data?: { banners?: Array<Record<string, unknown>> } }>).then((payload) => {
       if (!active || !Array.isArray(payload.data?.banners)) return;
       setSlides(payload.data.banners.map((banner: Record<string, unknown>) => ({
         id: String(banner.key),

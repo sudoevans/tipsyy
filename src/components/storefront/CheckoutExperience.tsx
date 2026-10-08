@@ -292,7 +292,12 @@ export default function CheckoutExperience() {
     if (!deliveryLocation) return;
     let active = true;
     void fetch("/api/v1/delivery-areas", { cache: "no-store" })
-      .then((response) => response.json())
+      .then(
+        (response) =>
+          response.json() as Promise<{
+            data?: Array<Record<string, unknown>>;
+          }>,
+      )
       .then((payload) => {
         const areas = Array.isArray(payload.data)
           ? (payload.data as Array<Record<string, unknown>>)

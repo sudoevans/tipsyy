@@ -1,14 +1,13 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { cookies } from "next/headers";
 import { ADMIN_SESSION_COOKIE } from "@/server/admin-session-cookie";
 import { getAdminFromSession } from "@/server/admin-auth";
 import { sql } from "@/server/db";
 import { ApiError, apiErrorResponse, apiSuccess } from "@/server/http";
+import { storeProductImage } from "@/server/product-images";
 
-export const runtime = "nodejs";
+type ImageExtension = "jpg" | "png" | "webp";
 
-const imageExtensions = new Map([["image/jpeg", "jpg"], ["image/jpg", "jpg"], ["image/png", "png"], ["image/webp", "webp"]]);
+const imageExtensions = new Map<string, ImageExtension>([["image/jpeg", "jpg"], ["image/jpg", "jpg"], ["image/png", "png"], ["image/webp", "webp"]]);
 const maxBytes = 5 * 1024 * 1024;
 
 function assertRemoteUrl(value: string) {
@@ -44,17 +43,14 @@ export async function POST(request: Request) {
     if (!extension) throw new ApiError(422, "INVALID_IMAGE", "The URL must point to a JPG, PNG, or WebP image.");
     const contentLength = Number(response.headers.get("content-length") ?? 0);
     if (contentLength > maxBytes) throw new ApiError(422, "IMAGE_TOO_LARGE", "Images must be 5 MB or smaller.");
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (!bytes.length || bytes.length > maxBytes) throw new ApiError(422, "IMAGE_TOO_LARGE", "Images must be 5 MB or smaller.");
-    const directory = path.join(process.cwd(), "public", "uploads", "products");
-    await mkdir(directory, { recursive: true });
-    const filename = `${crypto.randomUUID()}.${extension}`;
-    await writeFile(path.join(directory, filename), bytes);
+    const bytes = await response.arrayBuffer();
+    if (!bytes.byteLength || bytes.byteLength > maxBytes) throw new ApiError(422, "IMAGE_TOO_LARGE", "Images must be 5 MB or smaller.");
+    const uploaded = await storeProductImage(bytes, extension, contentType);
     await sql`
       INSERT INTO admin_activity_logs (actor_user_id, action, entity_type, entity_id, metadata)
-      VALUES (${admin.id}, 'product_image.retrieved', 'product_image', ${filename}, ${sql.json({ source: 'url', sourceUrl: finalUrl.toString() })})
+      VALUES (${admin.id}, 'product_image.retrieved', 'product_image', ${uploaded.key}, ${sql.json({ source: 'url', sourceUrl: finalUrl.toString() })})
     `;
-    return apiSuccess({ url: `/uploads/products/${filename}`, sourceUrl: finalUrl.toString() }, { status: 201 });
+    return apiSuccess({ url: uploaded.url, sourceUrl: finalUrl.toString() }, { status: 201 });
   } catch (error) {
     return apiErrorResponse(error, requestId);
   }

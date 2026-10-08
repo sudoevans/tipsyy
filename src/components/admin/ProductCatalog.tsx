@@ -467,8 +467,12 @@ function AddProductDialog({
         method: "POST",
         body,
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.error?.message);
+      const payload = (await response.json()) as {
+        data?: { url?: string };
+        error?: { message?: string };
+      };
+      if (!response.ok || !payload.data?.url)
+        throw new Error(payload.error?.message ?? "Image upload failed.");
       setImageUrl(payload.data.url);
       showToast({ title: "Image uploaded", tone: "success" });
     } catch (error) {

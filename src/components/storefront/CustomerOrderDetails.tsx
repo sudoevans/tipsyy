@@ -7,9 +7,9 @@ export default function CustomerOrderDetails({ orderNumber }: { orderNumber: str
   const [state, setState] = useState<{ loading: boolean; error: string; order: Record<string, unknown> | null }>({ loading: true, error: "", order: null });
   useEffect(() => {
     let active = true;
-    const load = () => void fetch(`/api/v1/account/orders/${encodeURIComponent(orderNumber)}`, { cache: "no-store" }).then((response) => response.json().then((payload) => ({ response, payload }))).then(({ response, payload }) => {
+    const load = () => void fetch(`/api/v1/account/orders/${encodeURIComponent(orderNumber)}`, { cache: "no-store" }).then((response) => (response.json() as Promise<{ data?: Record<string, unknown>; error?: { message?: string } }>).then((payload) => ({ response, payload }))).then(({ response, payload }) => {
       if (!response.ok) throw new Error(payload.error?.message ?? "Could not load order.");
-      if (active) setState({ loading: false, error: "", order: payload.data });
+      if (active) setState({ loading: false, error: "", order: payload.data ?? null });
     }).catch(() => active && setState((current) => ({ loading: false, error: "We couldn’t refresh this order just now.", order: current.order })));
     load(); const timer = window.setInterval(load, 15_000); return () => { active = false; window.clearInterval(timer); };
   }, [orderNumber]);

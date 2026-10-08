@@ -7,6 +7,7 @@ import { formatPrice } from "./currency";
 
 type View = "overview" | "orders" | "addresses" | "favourites" | "notifications" | "settings" | "help";
 type ApiState = { loading: boolean; error: string; data: unknown };
+type ApiResponse<T = unknown> = { data?: T; error?: { message?: string } };
 
 const links: Array<{ view: View; label: string; icon: Parameters<typeof StoreIcon>[0]["name"] }> = [
   { view: "overview", label: "Account", icon: "user" },
@@ -32,7 +33,7 @@ export default function CustomerAccount({ view }: { view: View }) {
     if (!url) return;
     let active = true;
     void fetch(url, { credentials: "same-origin", cache: "no-store" }).then(async (response) => {
-      const payload = await response.json();
+      const payload = (await response.json()) as ApiResponse;
       if (!response.ok) throw new Error(payload.error?.message ?? "Could not load this page.");
       if (active) setState({ loading: false, error: "", data: payload.data });
     }).catch(() => active && setState((current) => ({ loading: false, error: "We couldn’t refresh this page. Please try again.", data: current.data })));
@@ -75,7 +76,7 @@ function Addresses({ data, onRefresh }: { data: Array<Record<string, unknown>>; 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     const response = await fetch("/api/v1/account/addresses", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deliveryArea: form.get("area"), addressLine: form.get("address"), label: form.get("label"), isDefault: form.get("default") === "on" }) });
-    const payload = await response.json(); setMessage(response.ok ? "Address saved." : payload.error?.message ?? "Could not save address."); if (response.ok) { setShowForm(false); onRefresh(); }
+    const payload = (await response.json()) as ApiResponse; setMessage(response.ok ? "Address saved." : payload.error?.message ?? "Could not save address."); if (response.ok) { setShowForm(false); onRefresh(); }
   }
   return <><div className="flex items-center justify-between"><h1 className="text-2xl font-semibold">Saved addresses</h1><button className="text-sm font-bold underline decoration-tipsy-amber-500 decoration-2 underline-offset-4" onClick={() => setShowForm(!showForm)} type="button">{showForm ? "Cancel" : "Add address"}</button></div>{showForm ? <form className="mt-5 grid gap-3 rounded-xl bg-tipsy-surface p-4" onSubmit={submit}><input className="h-11 rounded-xl bg-white px-3 text-sm outline-none ring-tipsy-amber-500 focus:ring-2" name="label" placeholder="Label, e.g. Home" /><input className="h-11 rounded-xl bg-white px-3 text-sm outline-none ring-tipsy-amber-500 focus:ring-2" name="area" placeholder="Delivery area slug or name" required /><input className="h-11 rounded-xl bg-white px-3 text-sm outline-none ring-tipsy-amber-500 focus:ring-2" name="address" placeholder="Address or landmark" required /><label className="flex items-center gap-2 text-sm"><input name="default" type="checkbox" /> Make default</label><button className="h-11 rounded-xl bg-tipsy-amber-500 text-sm font-bold" type="submit">Save address</button></form> : null}{message ? <p className="mt-3 text-sm text-tipsy-muted">{message}</p> : null}<div className="mt-5 grid gap-3">{data.length ? data.map((address) => <article className="flex items-start gap-3 rounded-xl bg-tipsy-surface p-4" key={String(address.id)}><StoreIcon className="mt-0.5 size-5" name="location" /><div><strong className="text-sm">{String(address.label ?? address.delivery_area_name ?? "Delivery address")}</strong><p className="mt-1 text-sm text-tipsy-muted">{String(address.address_line)}</p>{address.is_default ? <span className="mt-2 inline-block text-xs font-semibold text-tipsy-amber-700">Default</span> : null}</div></article>) : <Empty>No saved addresses yet.</Empty>}</div></>;
 }
@@ -92,7 +93,7 @@ function Notifications({ data, onRefresh }: { data: Array<Record<string, unknown
 
 function Settings({ data, onRefresh }: { data: Record<string, unknown>; onRefresh: () => void }) {
   const [message, setMessage] = useState("");
-  async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); const response = await fetch("/api/v1/account/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ displayName: form.get("name"), marketingOptIn: form.get("marketing") === "on" }) }); const payload = await response.json(); setMessage(response.ok ? "Profile saved." : payload.error?.message ?? "Could not save profile."); if (response.ok) onRefresh(); }
+  async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); const response = await fetch("/api/v1/account/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ displayName: form.get("name"), marketingOptIn: form.get("marketing") === "on" }) }); const payload = (await response.json()) as ApiResponse; setMessage(response.ok ? "Profile saved." : payload.error?.message ?? "Could not save profile."); if (response.ok) onRefresh(); }
   return <><h1 className="text-2xl font-semibold">Settings</h1><form className="mt-5 grid max-w-lg gap-4" onSubmit={submit}><label className="grid gap-1.5 text-sm font-semibold">Name<input className="h-12 rounded-xl border border-tipsy-line px-3 text-sm outline-none focus:border-tipsy-amber-500" defaultValue={String(data.display_name ?? "")} name="name" required /></label><label className="flex items-center gap-2 text-sm"><input defaultChecked={Boolean(data.marketing_opt_in)} name="marketing" type="checkbox" /> Send me useful offers</label><button className="h-12 rounded-xl bg-tipsy-amber-500 text-sm font-bold" type="submit">Save changes</button>{message ? <p className="text-sm text-tipsy-muted">{message}</p> : null}</form></>;
 }
 

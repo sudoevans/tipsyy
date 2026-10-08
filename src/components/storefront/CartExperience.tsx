@@ -33,7 +33,7 @@ export default function CartExperience() {
     if (!cartSignature) return;
     let active = true;
     const quoteItems = cartSignature.split("|").map((entry) => { const [productSlug, quantity] = entry.split(":"); return { productSlug, quantity: Number(quantity) }; });
-    void fetch("/api/v1/cart/quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: quoteItems, deliveryArea: readDeliveryLocation() || undefined, couponCode: readCouponCode() || undefined }) }).then((response) => response.json()).then((payload) => { if (active && payload.data) setQuote(payload.data); }).catch(() => undefined);
+    void fetch("/api/v1/cart/quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: quoteItems, deliveryArea: readDeliveryLocation() || undefined, couponCode: readCouponCode() || undefined }) }).then((response) => response.json() as Promise<{ data?: { subtotal: number; discount: number; deliveryFee: number; total: number } }>).then((payload) => { if (active && payload.data) setQuote(payload.data); }).catch(() => undefined);
     return () => { active = false; };
   }, [cartSignature]);
 

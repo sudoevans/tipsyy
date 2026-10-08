@@ -1,14 +1,13 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { cookies } from "next/headers";
 import { ADMIN_SESSION_COOKIE } from "@/server/admin-session-cookie";
 import { getAdminFromSession } from "@/server/admin-auth";
 import { sql } from "@/server/db";
 import { ApiError, apiErrorResponse, apiSuccess } from "@/server/http";
+import { storeProductImage } from "@/server/product-images";
 
-export const runtime = "nodejs";
+type ImageExtension = "jpg" | "png" | "webp";
 
-const allowedTypes = new Map([["image/jpeg", "jpg"], ["image/png", "png"], ["image/webp", "webp"]]);
+const allowedTypes = new Map<string, ImageExtension>([["image/jpeg", "jpg"], ["image/png", "png"], ["image/webp", "webp"]]);
 
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
@@ -22,15 +21,16 @@ export async function POST(request: Request) {
     if (file.size > 5 * 1024 * 1024) throw new ApiError(422, "IMAGE_TOO_LARGE", "Images must be 5 MB or smaller.");
     const extension = allowedTypes.get(file.type);
     if (!extension) throw new ApiError(422, "INVALID_IMAGE", "Use a JPG, PNG, or WebP image.");
-    const directory = path.join(process.cwd(), "public", "uploads", "products");
-    await mkdir(directory, { recursive: true });
-    const filename = `${crypto.randomUUID()}.${extension}`;
-    await writeFile(path.join(directory, filename), Buffer.from(await file.arrayBuffer()));
+    const uploaded = await storeProductImage(
+      await file.arrayBuffer(),
+      extension,
+      file.type,
+    );
     await sql`
       INSERT INTO admin_activity_logs (actor_user_id, action, entity_type, entity_id, metadata)
-      VALUES (${admin.id}, 'product_image.uploaded', 'product_image', ${filename}, ${sql.json({ source: 'upload', size: file.size })})
+      VALUES (${admin.id}, 'product_image.uploaded', 'product_image', ${uploaded.key}, ${sql.json({ source: 'upload', size: file.size })})
     `;
-    return apiSuccess({ url: `/uploads/products/${filename}` }, { status: 201 });
+    return apiSuccess({ url: uploaded.url }, { status: 201 });
   } catch (error) {
     return apiErrorResponse(error, requestId);
   }

@@ -20,6 +20,11 @@ type Props = {
   imageUrl: string | null;
 };
 
+type ImageUploadResponse = {
+  data?: { url?: string };
+  error?: { message?: string };
+};
+
 export default function ProductImageEditor({
   productId,
   productName,
@@ -58,8 +63,8 @@ export default function ProductImageEditor({
         method: "POST",
         body,
       });
-      const payload = await response.json();
-      if (!response.ok)
+      const payload = (await response.json()) as ImageUploadResponse;
+      if (!response.ok || !payload.data?.url)
         throw new Error(payload?.error?.message ?? "Image upload failed.");
       setDraftImage(payload.data.url);
     } catch (uploadError) {
@@ -90,8 +95,8 @@ export default function ProductImageEditor({
           body: JSON.stringify({ url: url.trim() }),
         },
       );
-      const payload = await response.json();
-      if (!response.ok)
+      const payload = (await response.json()) as ImageUploadResponse;
+      if (!response.ok || !payload.data?.url)
         throw new Error(
           payload?.error?.message ?? "We could not retrieve that image.",
         );
