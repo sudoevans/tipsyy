@@ -1,6 +1,7 @@
 "use client";
 
 import { useSidebar } from "@/context/SidebarContext";
+import { useAdminNotifications } from "@/components/admin/AdminNotificationsProvider";
 import {
   BoltIcon,
   BoxCubeIcon,
@@ -25,6 +26,7 @@ type NavItem = {
   path: string;
   icon: ReactNode;
   exact?: boolean;
+  badge?: "inventory" | "transactions";
 };
 
 const operations: NavItem[] = [
@@ -34,9 +36,10 @@ const operations: NavItem[] = [
     label: "Transactions",
     path: "/admin/transactions",
     icon: <DollarLineIcon />,
+    badge: "transactions",
   },
   { label: "Products", path: "/admin/products", icon: <BoxCubeIcon /> },
-  { label: "Inventory", path: "/admin/inventory", icon: <ListIcon /> },
+  { label: "Inventory", path: "/admin/inventory", icon: <ListIcon />, badge: "inventory" },
   { label: "Customers", path: "/admin/customers", icon: <GroupIcon /> },
   { label: "Drivers", path: "/admin/riders", icon: <UserCircleIcon /> },
   { label: "Delivery zones", path: "/admin/delivery", icon: <TaskIcon /> },
@@ -63,6 +66,7 @@ function NavigationGroup({
   expanded: boolean;
 }) {
   const pathname = usePathname();
+  const { summary } = useAdminNotifications();
   return (
     <div>
       {expanded ? (
@@ -72,6 +76,7 @@ function NavigationGroup({
       ) : null}
       <ul className="space-y-1">
         {items.map((item) => {
+          const badgeCount = item.badge === "inventory" ? summary.lowStock : item.badge === "transactions" ? summary.openInvestigations : 0;
           const active = item.exact
             ? pathname === item.path
             : pathname === item.path || pathname.startsWith(`${item.path}/`);
@@ -81,7 +86,7 @@ function NavigationGroup({
                 href={item.path}
                 title={!expanded ? item.label : undefined}
                 className={cn(
-                  "group menu-item",
+                  "group relative menu-item",
                   expanded ? "justify-start" : "xl:justify-center",
                   active ? "menu-item-active" : "menu-item-inactive",
                 )}
@@ -93,9 +98,8 @@ function NavigationGroup({
                 >
                   {item.icon}
                 </span>
-                {expanded ? (
-                  <span className="menu-item-text">{item.label}</span>
-                ) : null}
+                {expanded ? <span className="menu-item-text">{item.label}</span> : null}
+                {badgeCount > 0 ? <span className={`rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white ${expanded ? "ml-auto" : "absolute top-1 right-1"}`}>{badgeCount > 99 ? "99+" : badgeCount}</span> : null}
               </Link>
             </li>
           );

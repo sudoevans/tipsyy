@@ -1,17 +1,21 @@
 "use client";
 
 import { ThemeToggleButton } from "@/components/common/ThemeToggleButton";
+import { useAdminNotifications } from "@/components/admin/AdminNotificationsProvider";
 import { useSidebar } from "@/context/SidebarContext";
 import { ChevronDownIcon } from "@/icons";
 import { Link, useRouter } from "@/i18n/navigation";
+import { AlertTriangleIcon, Bell01Icon, CheckCircleIcon, InfoCircleIcon } from "@untitledui/icons-react/outline";
 import Image from "next/image";
 import { useState } from "react";
 
 export default function AppHeader({ displayName, role }: { displayName?: string | null; role?: string | null }) {
   const { isMobileOpen, toggleSidebar, toggleMobileSidebar } = useSidebar();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const router = useRouter();
+  const { summary, notifications, total, loading, refresh, loadMore, markRead, markAllRead } = useAdminNotifications();
   const handleToggle = () => window.innerWidth >= 1280 ? toggleSidebar() : toggleMobileSidebar();
   const signOut = async () => {
     setSigningOut(true);
@@ -36,7 +40,28 @@ export default function AppHeader({ displayName, role }: { displayName?: string 
 
         <div className="flex items-center gap-2 2xsm:gap-3">
           <ThemeToggleButton />
-          <button aria-label="Notifications" className="relative flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800" type="button"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4.375 14.459V9.167a5.625 5.625 0 0 1 11.25 0v5.292m-12.292.75h13.334M8 17.709h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg></button>
+          <div className="relative">
+            <button aria-expanded={notificationsOpen} aria-haspopup="dialog" aria-label="Notifications" className="relative flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800" onClick={() => { setNotificationsOpen((open) => !open); void refresh(); }} type="button">
+              <Bell01Icon className="size-5" strokeWidth={1.8} />
+              {summary.unread > 0 ? <span className="absolute -top-1 -right-1 grid min-w-5 h-5 place-items-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold leading-none text-white dark:border-gray-900">{summary.unread > 99 ? "99+" : summary.unread}</span> : null}
+            </button>
+            {notificationsOpen ? <div aria-label="Notifications" className="absolute right-0 z-100 mt-3 w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-lg dark:border-gray-800 dark:bg-gray-dark" role="dialog">
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+                <div><p className="text-sm font-semibold text-gray-800 dark:text-white">Notifications</p><p className="mt-0.5 text-xs text-gray-500">{summary.unread ? `${summary.unread} unread` : "You’re all caught up"}</p></div>
+                {summary.unread ? <button className="text-xs font-semibold text-brand-600 hover:text-brand-700" onClick={() => void markAllRead()} type="button">Mark all read</button> : null}
+              </div>
+              <div className="max-h-[26rem] overflow-y-auto">
+                {notifications.length ? notifications.map((notification) => {
+                  const Icon = notification.severity === "CRITICAL" ? AlertTriangleIcon : notification.severity === "WARNING" ? InfoCircleIcon : CheckCircleIcon;
+                  const tone = notification.severity === "CRITICAL" ? "bg-red-50 text-red-600" : notification.severity === "WARNING" ? "bg-warning-50 text-warning-600" : "bg-brand-50 text-brand-600";
+                  const item = <><span className={`mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg ${tone}`}><Icon className="size-4" strokeWidth={2} /></span><span className="min-w-0 flex-1"><span className="flex items-start justify-between gap-3"><strong className="text-sm text-gray-800 dark:text-white">{notification.title}</strong><time className="shrink-0 text-[11px] text-gray-400">{new Intl.DateTimeFormat("en-KE", { hour: "numeric", minute: "2-digit", day: "numeric", month: "short" }).format(new Date(notification.created_at))}</time></span><span className="mt-1 block text-xs leading-5 text-gray-500 dark:text-gray-400">{notification.body}</span></span>{!notification.read_at ? <span className="mt-2 size-2 shrink-0 rounded-full bg-brand-500" /> : null}</>;
+                  const className = `flex w-full gap-3 border-b border-gray-100 px-4 py-3 text-left transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-white/5 ${notification.read_at ? "" : "bg-brand-50/40 dark:bg-brand-500/5"}`;
+                  return notification.href ? <Link className={className} href={notification.href} key={notification.id} onClick={() => { void markRead(notification.id); setNotificationsOpen(false); }}>{item}</Link> : <button className={className} key={notification.id} onClick={() => void markRead(notification.id)} type="button">{item}</button>;
+                }) : <p className="px-4 py-10 text-center text-sm text-gray-500">{loading ? "Loading notifications…" : "No notifications yet."}</p>}
+              </div>
+              {notifications.length < total ? <button className="w-full border-t border-gray-100 px-4 py-3 text-sm font-semibold text-brand-600 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-800 dark:hover:bg-white/5" disabled={loading} onClick={() => void loadMore()} type="button">{loading ? "Loading…" : "Load more"}</button> : null}
+            </div> : null}
+          </div>
           <div className="relative">
             <button className="flex items-center text-gray-700 dark:text-gray-400" onClick={() => setMenuOpen((open) => !open)} type="button">
               <span className="me-3 h-11 w-11 overflow-hidden rounded-full"><Image width={44} height={44} src="/images/user/owner.png" alt="Admin" /></span>

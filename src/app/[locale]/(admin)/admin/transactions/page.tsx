@@ -1,8 +1,12 @@
 import AdminPagination from "@/components/admin/AdminPagination";
 import OrderFilters from "@/components/admin/OrderFilters";
+import PaymentInvestigationActions from "@/components/admin/PaymentInvestigationActions";
 import BasicTableOne from "@/components/tables/BasicTableOne";
 import Badge from "@/components/ui/badge/Badge";
+import { getAdminFromSession } from "@/server/admin-auth";
+import { ADMIN_SESSION_COOKIE } from "@/server/admin-session-cookie";
 import { sql } from "@/server/db";
+import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
@@ -24,11 +28,15 @@ type TransactionRow = {
   amount_minor: number;
   provider_receipt: string | null;
   payment_status: string;
+  settlement_source: string | null;
   attempt_status: string | null;
   result_description: string | null;
   initiated_at: Date | null;
   completed_at: Date | null;
   attempt_count: number;
+  investigation_id: string | null;
+  investigation_status: string | null;
+  claimed_receipt: string | null;
 };
 
 function badgeColor(status: string) {
@@ -44,6 +52,8 @@ export default async function TransactionsPage({
   searchParams: Promise<{ q?: string; status?: string; page?: string }>;
 }) {
   const input = await searchParams;
+  const cookieStore = await cookies();
+  const admin = await getAdminFromSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value);
   const q = (input.q ?? "").trim();
   const status = [
     "all",
@@ -52,6 +62,7 @@ export default async function TransactionsPage({
     "CANCELLED",
     "TIMED_OUT",
     "FAILED",
+    "RECONCILING",
   ].includes(input.status ?? "")
     ? (input.status ?? "all")
     : "all";
@@ -77,9 +88,11 @@ export default async function TransactionsPage({
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(requestedPage, pageCount);
   const transactions = await sql<TransactionRow[]>`
-    SELECT o.order_number, o.customer_name, o.customer_phone, p.amount_minor, p.provider_receipt, p.status::text AS payment_status,
+    SELECT o.order_number, o.customer_name, o.customer_phone, p.amount_minor, p.provider_receipt, p.status::text AS payment_status, p.settlement_source,
            pa.status::text AS attempt_status, pa.result_description, pa.initiated_at, pa.completed_at,
-           COALESCE(pa.attempt_count, 0)::int AS attempt_count
+           COALESCE(pa.attempt_count, 0)::int AS attempt_count,
+           investigation.id AS investigation_id, investigation.status::text AS investigation_status,
+           investigation.claimed_receipt
     FROM payments p
     JOIN orders o ON o.id = p.order_id
     LEFT JOIN LATERAL (
@@ -90,6 +103,10 @@ export default async function TransactionsPage({
       ORDER BY latest.initiated_at DESC, latest.id DESC
       LIMIT 1
     ) pa ON true
+    LEFT JOIN LATERAL (
+      SELECT id, status, claimed_receipt FROM payment_investigations
+      WHERE payment_id = p.id ORDER BY created_at DESC LIMIT 1
+    ) investigation ON true
     WHERE (
       ${q} = '' OR o.order_number ILIKE ${`%${q}%`} OR o.customer_name ILIKE ${`%${q}%`} OR o.customer_phone ILIKE ${`%${q}%`}
     ) AND (
@@ -117,6 +134,7 @@ export default async function TransactionsPage({
               { value: "CANCELLED", label: "Cancelled" },
               { value: "TIMED_OUT", label: "Timed out" },
               { value: "FAILED", label: "Failed" },
+              { value: "RECONCILING", label: "Under review" },
             ]}
           />
         }
@@ -129,6 +147,7 @@ export default async function TransactionsPage({
           "Retries",
           "Activity",
           "Provider message",
+          "Review",
         ]}
         empty="No payment transactions match this search."
         pagination={false}
@@ -172,6 +191,7 @@ export default async function TransactionsPage({
                   {attemptStatus.replaceAll("_", " ")}
                 </Badge>
               ) : null}
+              {transaction.settlement_source === "ADMIN_CONFIRMATION" ? <Badge color="warning" size="sm">Manual confirmation</Badge> : null}
             </div>,
             <span className="text-sm text-gray-600" key="retries">
               {transaction.attempt_count > 1
@@ -195,6 +215,11 @@ export default async function TransactionsPage({
             <span className="line-clamp-3 text-sm text-gray-500" key="message">
               {transaction.result_description ?? "—"}
             </span>,
+            <div className="space-y-1" key="review">
+              {transaction.investigation_status ? <Badge color={transaction.investigation_status === "CONFIRMED" ? "success" : transaction.investigation_status === "REJECTED" ? "error" : "warning"} size="sm">{transaction.investigation_status.replaceAll("_", " ")}</Badge> : null}
+              {transaction.claimed_receipt ? <p className="font-mono text-xs text-gray-500">Claimed: {transaction.claimed_receipt}</p> : null}
+              <PaymentInvestigationActions canConfirm={admin?.role === "ADMIN"} investigationId={transaction.investigation_id} status={transaction.investigation_status} receipt={transaction.claimed_receipt} payerPhone={transaction.customer_phone} amountMinor={transaction.amount_minor} />
+            </div>,
           ];
         })}
       />

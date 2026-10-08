@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getAdminFromSession } from "@/server/admin-auth";
 import { ADMIN_SESSION_COOKIE } from "@/server/admin-session-cookie";
 import { sql } from "@/server/db";
+import { evaluateInventoryNotifications } from "@/server/admin-notifications";
 import { hashPassword } from "@/server/admin-auth";
 import { redirect } from "next/navigation";
 
@@ -182,6 +183,7 @@ export async function updateInventory(variantId: string, formData: FormData) {
   const [row] =
     await sql`UPDATE inventory SET on_hand_quantity = ${input.onHand}, updated_at = now() WHERE variant_id = ${idSchema.parse(variantId)} AND reserved_quantity <= ${input.onHand} RETURNING variant_id`;
   if (!row) throw new Error("On-hand stock cannot be below reserved stock.");
+  await evaluateInventoryNotifications(sql);
   await audit(
     admin.id,
     "inventory.updated",
@@ -204,6 +206,7 @@ export async function addInventoryItem(formData: FormData) {
       onHand: formData.get("onHand"),
     });
   await sql`INSERT INTO inventory (variant_id,on_hand_quantity,low_stock_threshold) VALUES (${input.variantId},${input.onHand},COALESCE((SELECT (value->>'quantity')::int FROM platform_settings WHERE key='inventory.low_stock_threshold'),3)) ON CONFLICT (variant_id) DO UPDATE SET on_hand_quantity=GREATEST(${input.onHand},inventory.reserved_quantity),updated_at=now()`;
+  await evaluateInventoryNotifications(sql);
   await audit(
     admin.id,
     "inventory.item_added",
@@ -241,6 +244,7 @@ export async function saveOperationsSettings(formData: FormData) {
   await sql`INSERT INTO platform_settings (key,value,description,updated_by) VALUES ('inventory.low_stock_threshold',${sql.json({ quantity: input.lowStockThreshold })},'Global available-stock level that triggers a low-stock alert.',${admin.id}) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_by=EXCLUDED.updated_by,updated_at=now()`;
   await sql`INSERT INTO platform_settings (key,value,description,updated_by) VALUES ('store.operating_hours',${sql.json({ weekday: { open: input.weekdayOpen, close: input.weekdayClose }, weekend: { open: input.weekendOpen, close: input.weekendClose }, closingSoonMinutes: input.closingSoonMinutes })},'Store opening hours for weekdays and weekends in Africa/Nairobi.',${admin.id}) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_by=EXCLUDED.updated_by,updated_at=now()`;
   await sql`UPDATE inventory SET low_stock_threshold=${input.lowStockThreshold},updated_at=now()`;
+  await evaluateInventoryNotifications(sql);
   await audit(
     admin.id,
     "settings.updated",

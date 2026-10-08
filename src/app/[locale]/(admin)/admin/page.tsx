@@ -1,6 +1,7 @@
 import { EcommerceMetrics } from "@/components/ecommerce/EcommerceMetrics";
 import RecentOrders from "@/components/ecommerce/RecentOrders";
 import MonthlySalesChart from "@/components/ecommerce/MonthlySalesChart";
+import OperationsAttention from "@/components/admin/OperationsAttention";
 import { sql } from "@/server/db";
 import { ArrowUpRightIcon, CoinsStacked03Icon, LineChartUp01Icon, ReceiptIcon, User01Icon } from "@untitledui/icons-react/outline";
 import type { Metadata } from "next";
@@ -50,6 +51,7 @@ export default async function AdminOverviewPage() {
       <div className="col-span-12">
       <EcommerceMetrics metrics={{ revenue: money.format(summary.revenue_minor), orders: summary.order_count.toLocaleString(), customers: summary.customer_count.toLocaleString(), activeRiders: summary.rider_count.toLocaleString() }} />
       </div>
+      <div className="col-span-12"><OperationsAttention /></div>
       <div className="col-span-12 space-y-4 xl:col-span-7">
         <MonthlySalesChart data={monthlyOrders} />
         <section className="rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
