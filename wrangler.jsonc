@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "tipsyy",
   "main": "src/cloudflare-worker.ts",
-  "compatibility_date": "2026-10-08",
+  "compatibility_date": "2026-10-09",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": ".open-next/assets",
@@ -11,7 +11,8 @@
   "r2_buckets": [
     {
       "binding": "PRODUCT_IMAGES",
-      "bucket_name": "tipsyy-product-images"
+      "bucket_name": "tipsyy-product-images",
+      "remote": true
     }
   ],
   "vars": {
