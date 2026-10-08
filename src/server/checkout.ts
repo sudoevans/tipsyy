@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { evaluateInventoryNotifications } from "./admin-notifications";
 import { sql, type Transaction, withTransaction } from "./db";
 import { ApiError } from "./http";
 import {
@@ -143,6 +144,7 @@ export async function releaseOrderReservations(
     `;
   }
   await releaseCouponForOrder(tx, orderId);
+  await evaluateInventoryNotifications(tx);
 }
 
 export async function convertOrderReservations(
@@ -179,6 +181,7 @@ export async function convertOrderReservations(
       WHERE id = ${reservation.id}
     `;
   }
+  await evaluateInventoryNotifications(tx);
 }
 
 export async function releaseExpiredReservations(tx: Transaction) {
@@ -226,11 +229,13 @@ export async function releaseExpiredReservations(tx: Transaction) {
       VALUES (${orderId}, 'PENDING_PAYMENT', 'PAYMENT_CANCELLED', 'reservation-expiry', 'Stock reservation expired before payment completed.')
     `;
   }
+  if (orderIds.size) await evaluateInventoryNotifications(tx);
 }
 
 export async function expireReservations() {
   return withTransaction(async (tx) => {
     await releaseExpiredReservations(tx);
+    await evaluateInventoryNotifications(tx);
     const [{ count }] = await tx<{ count: number }[]>`
       SELECT count(*)::int AS count FROM inventory_reservations WHERE status = 'EXPIRED' AND released_at > now() - interval '5 minutes'
     `;
@@ -460,6 +465,7 @@ export async function createCheckoutOrder(
         VALUES (${order.id}, ${item.variant_id}, ${item.quantity}, ${reservationExpiresAt})
       `;
     }
+    await evaluateInventoryNotifications(tx);
 
     const [payment] = await tx<{ id: string }[]>`
       INSERT INTO payments (order_id, amount_minor, payer_phone)

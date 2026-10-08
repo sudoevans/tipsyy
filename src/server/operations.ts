@@ -48,7 +48,7 @@ async function recordAdminActivity(
 ) {
   await tx`
     INSERT INTO admin_activity_logs (actor_user_id, action, entity_type, entity_id, metadata)
-    VALUES (${actorUserId}, ${action}, ${entityType}, ${entityId}, ${tx.json(metadata)})
+    VALUES (${actorUserId}, ${action}, ${entityType}, ${entityId}, ${tx.json(JSON.parse(JSON.stringify(metadata)))})
   `;
 }
 

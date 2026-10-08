@@ -5,6 +5,7 @@ import {
   ensureCheckoutCustomerAccount,
   releaseOrderReservations,
 } from "./checkout";
+import { evaluateInventoryNotifications, publishAdminNotification, resolveAdminNotification } from "./admin-notifications";
 import { sql, type Transaction, withTransaction } from "./db";
 import { ApiError } from "./http";
 import {
@@ -30,6 +31,28 @@ export const receiptLookupSchema = z.object({
     .regex(/^[A-Z0-9]{8,20}$/),
 });
 
+export const reportPaymentIssueSchema = z.object({
+  orderNumber: z.string().min(4).max(40),
+  accessToken: z.string().min(20).max(200),
+  receipt: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9]{8,20}$/),
+});
+
+export const confirmPaymentInvestigationSchema = z.object({
+  receipt: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9]{8,20}$/),
+  payerPhone: z.string().min(9).max(25),
+  amountMinor: z.coerce.number().int().positive(),
+  paidAt: z.coerce.date(),
+  note: z.string().trim().min(8).max(800),
+});
+
 export const cancelPaymentSchema = z.object({
   orderNumber: z.string().min(4).max(40),
   accessToken: z.string().min(20).max(200),
@@ -51,13 +74,16 @@ interface PaymentContext {
 
 interface CallbackAttempt {
   attempt_id: string;
+  attempt_status: string;
   payment_id: string;
   payment_status: string;
   order_id: string;
+  order_number: string;
   order_status: string;
   amount_minor: number;
   customer_phone: string;
   user_id: string | null;
+  merchant_request_id: string | null;
 }
 
 function callbackPaymentStatus(resultCode: number) {
@@ -89,6 +115,9 @@ async function reacquireAndConvertLateReservation(
   tx: Transaction,
   orderId: string,
 ) {
+  const [expectedItems] = await tx<{ count: number }[]>`
+    SELECT count(*)::int AS count FROM order_items WHERE order_id = ${orderId}
+  `;
   const items = await tx<
     {
       variant_id: string;
@@ -104,6 +133,7 @@ async function reacquireAndConvertLateReservation(
     WHERE oi.order_id = ${orderId}
     FOR UPDATE OF i
   `;
+  if (items.length === 0 || items.length !== expectedItems?.count) return false;
   for (const item of items) {
     if (
       item.variant_id === null ||
@@ -126,6 +156,97 @@ async function reacquireAndConvertLateReservation(
     `;
   }
   return true;
+}
+
+async function settleSuccessfulPayment(
+  tx: Transaction,
+  input: {
+    attemptId?: string | null;
+    paymentId: string;
+    orderId: string;
+    orderNumber: string;
+    orderStatus: string;
+    userId: string | null;
+    receipt: string;
+    payerPhone: string;
+    paidAt: Date;
+    source: "MPESA_CALLBACK" | "ADMIN_CONFIRMATION";
+    resultDescription: string;
+    callbackPayload?: unknown;
+    adminId?: string;
+    manualNote?: string;
+  },
+) {
+  const activeReservations = await tx<{ count: number }[]>`
+    SELECT count(*)::int AS count FROM inventory_reservations
+    WHERE order_id = ${input.orderId} AND status = 'ACTIVE'
+  `;
+  const inventorySettled =
+    activeReservations[0].count > 0
+      ? await convertOrderReservations(tx, input.orderId).then(() => true)
+      : await reacquireAndConvertLateReservation(tx, input.orderId);
+  const nextOrderStatus = inventorySettled ? "CONFIRMED" : "PAID_REQUIRES_REVIEW";
+  await evaluateInventoryNotifications(tx);
+
+  if (input.attemptId) {
+    await tx`
+      UPDATE payment_attempts
+      SET callback_payload = COALESCE(${input.callbackPayload ? tx.json(JSON.parse(JSON.stringify(input.callbackPayload))) : null}, callback_payload),
+          status = 'SUCCEEDED', result_code = '0', result_description = ${input.resultDescription},
+          callback_received_at = CASE WHEN ${input.source} = 'MPESA_CALLBACK' THEN now() ELSE callback_received_at END,
+          completed_at = now()
+      WHERE id = ${input.attemptId} AND status <> 'SUCCEEDED'
+    `;
+  }
+  await tx`
+    UPDATE payments
+    SET status = 'SUCCEEDED', provider_receipt = ${input.receipt}, payer_phone = ${input.payerPhone},
+        paid_at = ${input.paidAt}, raw_result = COALESCE(${input.callbackPayload ? tx.json(JSON.parse(JSON.stringify(input.callbackPayload))) : null}, raw_result),
+        settlement_source = ${input.source}, manually_confirmed_by = ${input.adminId ?? null},
+        manually_confirmed_at = ${input.adminId ? new Date() : null},
+        manual_confirmation_note = ${input.manualNote ?? null}, updated_at = now()
+    WHERE id = ${input.paymentId} AND status <> 'SUCCEEDED'
+  `;
+  await tx`
+    UPDATE orders
+    SET status = ${nextOrderStatus}, paid_at = ${input.paidAt},
+        confirmed_at = ${inventorySettled ? input.paidAt : null}, updated_at = now()
+    WHERE id = ${input.orderId}
+  `;
+  await tx`
+    INSERT INTO order_events (order_id, from_status, to_status, actor_user_id, source, note, metadata)
+    VALUES (${input.orderId}, ${input.orderStatus}, ${nextOrderStatus}, ${input.adminId ?? null},
+      ${input.source === "MPESA_CALLBACK" ? "mpesa-callback" : "admin-payment-confirmation"},
+      ${input.resultDescription}, ${tx.json({ receipt: input.receipt, settlementSource: input.source })})
+  `;
+  await tx`
+    INSERT INTO notifications (user_id, order_id, channel, event_type, destination, subject, body)
+    VALUES (${input.userId}, ${input.orderId}, 'SMS', 'PAYMENT_SUCCESSFUL', ${input.payerPhone}, 'Payment received',
+      ${`M-Pesa payment ${input.receipt} was received.`})
+  `;
+
+  if (inventorySettled) {
+    await publishAdminNotification(tx, {
+      eventType: "ORDER_READY",
+      entityType: "order",
+      entityId: input.orderId,
+      severity: "INFO",
+      title: "New paid order",
+      body: `${input.orderNumber} is paid and ready for operations.`,
+      href: `/admin/orders?q=${encodeURIComponent(input.orderNumber)}`,
+    });
+  } else {
+    await publishAdminNotification(tx, {
+      eventType: "PAID_FULFILMENT_REVIEW",
+      entityType: "order",
+      entityId: input.orderId,
+      severity: "CRITICAL",
+      title: "Paid order needs fulfilment review",
+      body: `${input.orderNumber} was paid, but its items are no longer available to fulfil automatically.`,
+      href: `/admin/orders?q=${encodeURIComponent(input.orderNumber)}`,
+    });
+  }
+  return { inventorySettled, nextOrderStatus };
 }
 
 export async function initiateOrderPayment(
@@ -160,6 +281,13 @@ export async function initiateOrderPayment(
         "This order has already been paid.",
       );
     }
+    if (payment.payment_status === "RECONCILING") {
+      throw new ApiError(
+        409,
+        "PAYMENT_UNDER_REVIEW",
+        "This payment is being reviewed. Check its status instead of starting another prompt.",
+      );
+    }
     if (payment.order_status !== "PENDING_PAYMENT") {
       throw new ApiError(
         409,
@@ -180,15 +308,21 @@ export async function initiateOrderPayment(
     const [existing] = await tx<
       {
         id: string;
+        payment_id: string;
         status: string;
         checkout_request_id: string | null;
         merchant_request_id: string | null;
       }[]
     >`
-      SELECT id, status, checkout_request_id, merchant_request_id
+      SELECT id, payment_id, status, checkout_request_id, merchant_request_id
       FROM payment_attempts WHERE idempotency_key = ${input.idempotencyKey}
     `;
-    if (existing) return { payment, attempt: existing, existing: true };
+    if (existing) {
+      if (existing.payment_id !== payment.payment_id) {
+        throw new ApiError(409, "IDEMPOTENCY_KEY_CONFLICT", "This payment request could not be safely repeated.");
+      }
+      return { payment, attempt: existing, existing: true };
+    }
     const [pending] = await tx<{ id: string }[]>`
       SELECT id FROM payment_attempts WHERE payment_id = ${payment.payment_id} AND status = 'PENDING'
     `;
@@ -207,8 +341,8 @@ export async function initiateOrderPayment(
         merchant_request_id: string | null;
       }[]
     >`
-      INSERT INTO payment_attempts (payment_id, idempotency_key, request_payload)
-      VALUES (${payment.payment_id}, ${input.idempotencyKey}, ${tx.json({ orderNumber: input.orderNumber, phone: payment.customer_phone, amount: payment.amount_minor })})
+      INSERT INTO payment_attempts (payment_id, idempotency_key, request_fingerprint, request_payload)
+      VALUES (${payment.payment_id}, ${input.idempotencyKey}, ${hashSecret(`${payment.order_id}:${payment.customer_phone}:${payment.amount_minor}`)}, ${tx.json({ orderNumber: input.orderNumber, phone: payment.customer_phone, amount: payment.amount_minor })})
       RETURNING id, status, checkout_request_id, merchant_request_id
     `;
     return { payment, attempt, existing: false };
@@ -280,6 +414,13 @@ export async function cancelPendingOrderPayment(
         "PAYMENT_ALREADY_COMPLETE",
         "This order has already been paid.",
       );
+    if (payment.payment_status === "RECONCILING") {
+      throw new ApiError(
+        409,
+        "PAYMENT_UNDER_REVIEW",
+        "This payment has been reported for review and cannot be cancelled.",
+      );
+    }
 
     if (
       payment.order_status === "PENDING_PAYMENT" &&
@@ -323,7 +464,7 @@ export async function processMpesaCallback(payload: StkCallbackPayload) {
   const resultDescription =
     callback.ResultDesc ?? "M-Pesa returned a payment result.";
   const serializedPayload = JSON.parse(JSON.stringify(payload));
-  const eventKey = `${checkoutRequestId}:${resultCode}`;
+  const eventKey = checkoutRequestId;
   return withTransaction(async (tx) => {
     const inserted = await tx<{ id: string }[]>`
       INSERT INTO webhook_events (provider, event_key, payload)
@@ -331,11 +472,33 @@ export async function processMpesaCallback(payload: StkCallbackPayload) {
       ON CONFLICT (provider, event_key) DO NOTHING
       RETURNING id
     `;
-    if (inserted.length === 0) return { duplicate: true, processed: true };
+    if (inserted.length === 0) {
+      const [existing] = await tx<{ payload: unknown }[]>`
+        SELECT payload FROM webhook_events WHERE provider = 'MPESA' AND event_key = ${eventKey}
+      `;
+      if (JSON.stringify(existing?.payload) !== JSON.stringify(serializedPayload)) {
+        await tx`
+          UPDATE webhook_events
+          SET processing_error = 'Conflicting callback payload received for CheckoutRequestID.'
+          WHERE provider = 'MPESA' AND event_key = ${eventKey}
+        `;
+        await publishAdminNotification(tx, {
+          eventType: "CONFLICTING_MPESA_CALLBACK",
+          entityType: "mpesa_checkout_request",
+          entityId: checkoutRequestId,
+          severity: "CRITICAL",
+          title: "Conflicting M-Pesa callback",
+          body: "A second callback for the same request carried different payment data.",
+          href: "/admin/transactions",
+        });
+      }
+      return { duplicate: true, processed: true };
+    }
 
     const attempts = await tx<CallbackAttempt[]>`
-      SELECT pa.id AS attempt_id, p.id AS payment_id, p.status AS payment_status,
-             o.id AS order_id, o.status AS order_status, p.amount_minor, o.customer_phone, o.user_id
+      SELECT pa.id AS attempt_id, pa.status AS attempt_status, pa.merchant_request_id,
+             p.id AS payment_id, p.status AS payment_status,
+             o.id AS order_id, o.order_number, o.status AS order_status, p.amount_minor, o.customer_phone, o.user_id
       FROM payment_attempts pa
       JOIN payments p ON p.id = pa.payment_id
       JOIN orders o ON o.id = p.order_id
@@ -348,6 +511,31 @@ export async function processMpesaCallback(payload: StkCallbackPayload) {
         UPDATE webhook_events SET processed_at = now(), processing_error = 'Unknown CheckoutRequestID'
         WHERE provider = 'MPESA' AND event_key = ${eventKey}
       `;
+      await publishAdminNotification(tx, {
+        eventType: "UNKNOWN_MPESA_CALLBACK",
+        entityType: "mpesa_checkout_request",
+        entityId: checkoutRequestId,
+        severity: "CRITICAL",
+        title: "Unknown M-Pesa callback",
+        body: "M-Pesa sent a callback that does not belong to a recorded payment attempt.",
+        href: "/admin/transactions",
+      });
+      return { duplicate: false, processed: false };
+    }
+    if (!callback.MerchantRequestID || callback.MerchantRequestID !== attempt.merchant_request_id) {
+      await tx`
+        UPDATE webhook_events SET processed_at = now(), processing_error = 'MerchantRequestID did not match the payment attempt.'
+        WHERE provider = 'MPESA' AND event_key = ${eventKey}
+      `;
+      await publishAdminNotification(tx, {
+        eventType: "MPESA_CALLBACK_MISMATCH",
+        entityType: "payment_attempt",
+        entityId: attempt.attempt_id,
+        severity: "CRITICAL",
+        title: "M-Pesa callback needs review",
+        body: "A payment callback did not match its original M-Pesa request.",
+        href: "/admin/transactions",
+      });
       return { duplicate: false, processed: false };
     }
     if (attempt.payment_status === "SUCCEEDED") {
@@ -382,51 +570,59 @@ export async function processMpesaCallback(payload: StkCallbackPayload) {
           UPDATE webhook_events SET processed_at = now(), processing_error = 'Callback payment details did not match the order.'
           WHERE provider = 'MPESA' AND event_key = ${eventKey}
         `;
-        await tx`
-          UPDATE payment_attempts SET callback_payload = ${tx.json(serializedPayload)}, status = 'FAILED', result_code = ${String(resultCode)},
-            result_description = 'Callback verification failed', completed_at = now() WHERE id = ${attempt.attempt_id}
-        `;
+        await tx`UPDATE payment_attempts SET callback_payload = ${tx.json(serializedPayload)}, status = 'FAILED', result_code = ${String(resultCode)}, result_description = 'Callback verification failed', callback_received_at = now(), completed_at = now() WHERE id = ${attempt.attempt_id} AND status = 'PENDING'`;
+        await tx`UPDATE payments SET status = 'RECONCILING', updated_at = now() WHERE id = ${attempt.payment_id} AND status <> 'SUCCEEDED'`;
+        await publishAdminNotification(tx, {
+          eventType: "MPESA_CALLBACK_MISMATCH",
+          entityType: "payment_attempt",
+          entityId: attempt.attempt_id,
+          severity: "CRITICAL",
+          title: "M-Pesa callback needs review",
+          body: "The receipt, amount, or payer number did not match the expected order payment.",
+          href: "/admin/transactions",
+        });
         return { duplicate: false, processed: false };
       }
-
-      const activeReservations = await tx<{ count: number }[]>`
-        SELECT count(*)::int AS count FROM inventory_reservations WHERE order_id = ${attempt.order_id} AND status = 'ACTIVE'
+      const [receiptOwner] = await tx<{ payment_id: string }[]>`
+        SELECT id AS payment_id FROM payments
+        WHERE lower(provider_receipt) = lower(${receipt})
+        FOR UPDATE
       `;
-      const inventorySettled =
-        activeReservations[0].count > 0
-          ? await convertOrderReservations(tx, attempt.order_id).then(
-              () => true,
-            )
-          : await reacquireAndConvertLateReservation(tx, attempt.order_id);
-      const paidAt = parseMpesaDate(metadata.TransactionDate) ?? new Date();
-
-      await tx`
-        UPDATE payment_attempts SET callback_payload = ${tx.json(serializedPayload)}, status = 'SUCCEEDED', result_code = '0',
-          result_description = ${resultDescription}, completed_at = now() WHERE id = ${attempt.attempt_id}
-      `;
-      await tx`
-        UPDATE payments SET status = 'SUCCEEDED', provider_receipt = ${receipt}, payer_phone = ${callbackPhone},
-          paid_at = ${paidAt}, raw_result = ${tx.json(serializedPayload)}, updated_at = now() WHERE id = ${attempt.payment_id}
-      `;
-      await tx`
-        UPDATE orders SET status = ${inventorySettled ? "CONFIRMED" : "PAID"}, paid_at = ${paidAt},
-          confirmed_at = ${inventorySettled ? paidAt : null}, updated_at = now() WHERE id = ${attempt.order_id}
-      `;
-      await tx`
-        INSERT INTO order_events (order_id, from_status, to_status, source, note, metadata)
-        VALUES (${attempt.order_id}, ${attempt.order_status}, 'PAID', 'mpesa-callback', 'M-Pesa payment verified.', ${tx.json({ receipt })})
-      `;
-      if (inventorySettled) {
-        await tx`
-          INSERT INTO order_events (order_id, from_status, to_status, source, note)
-          VALUES (${attempt.order_id}, 'PAID', 'CONFIRMED', 'mpesa-callback', 'Payment confirmed and reserved inventory converted to sale.')
-        `;
+      if (receiptOwner && receiptOwner.payment_id !== attempt.payment_id) {
+        await tx`UPDATE webhook_events SET processed_at = now(), processing_error = 'M-Pesa receipt is already attached to another payment.' WHERE provider = 'MPESA' AND event_key = ${eventKey}`;
+        await tx`UPDATE payment_attempts SET callback_payload = ${tx.json(serializedPayload)}, status = 'FAILED', result_code = ${String(resultCode)}, result_description = 'Receipt already used by another payment', callback_received_at = now(), completed_at = now() WHERE id = ${attempt.attempt_id} AND status = 'PENDING'`;
+        await tx`UPDATE payments SET status = 'RECONCILING', updated_at = now() WHERE id = ${attempt.payment_id} AND status <> 'SUCCEEDED'`;
+        await publishAdminNotification(tx, {
+          eventType: "DUPLICATE_MPESA_RECEIPT",
+          entityType: "payment_attempt",
+          entityId: attempt.attempt_id,
+          severity: "CRITICAL",
+          title: "M-Pesa receipt collision",
+          body: "A callback supplied a receipt already recorded against a different payment.",
+          href: "/admin/transactions",
+        });
+        return { duplicate: false, processed: false };
       }
-      await tx`
-        INSERT INTO notifications (user_id, order_id, channel, event_type, destination, subject, body)
-        VALUES (${attempt.user_id}, ${attempt.order_id}, 'SMS', 'PAYMENT_SUCCESSFUL', ${callbackPhone}, 'Payment received', ${`M-Pesa payment ${receipt} was received.`})
-      `;
+      const paidAt = parseMpesaDate(metadata.TransactionDate) ?? new Date();
+      await settleSuccessfulPayment(tx, {
+        attemptId: attempt.attempt_id,
+        paymentId: attempt.payment_id,
+        orderId: attempt.order_id,
+        orderNumber: attempt.order_number,
+        orderStatus: attempt.order_status,
+        userId: attempt.user_id,
+        receipt: receipt.toUpperCase(),
+        payerPhone: callbackPhone ?? attempt.customer_phone,
+        paidAt,
+        source: "MPESA_CALLBACK",
+        resultDescription,
+        callbackPayload: serializedPayload,
+      });
     } else {
+      if (attempt.attempt_status !== "PENDING") {
+        await tx`UPDATE webhook_events SET processed_at = now() WHERE provider = 'MPESA' AND event_key = ${eventKey}`;
+        return { duplicate: true, processed: true };
+      }
       const orderStatus = failureOrderStatus(resultCode);
       await releaseOrderReservations(tx, attempt.order_id);
       await tx`
@@ -448,6 +644,175 @@ export async function processMpesaCallback(payload: StkCallbackPayload) {
 
     await tx`UPDATE webhook_events SET processed_at = now() WHERE provider = 'MPESA' AND event_key = ${eventKey}`;
     return { duplicate: false, processed: true };
+  });
+}
+
+export async function reportPaymentIssue(
+  input: z.infer<typeof reportPaymentIssueSchema>,
+) {
+  return withTransaction(async (tx) => {
+    const [payment] = await tx<{
+      payment_id: string;
+      payment_status: string;
+      order_id: string;
+      order_number: string;
+      order_status: string;
+      order_created_at: Date;
+      customer_phone: string;
+      user_id: string | null;
+    }[]>`
+      SELECT p.id AS payment_id, p.status AS payment_status, o.id AS order_id,
+             o.order_number, o.status AS order_status, o.customer_phone, o.user_id
+      FROM orders o JOIN payments p ON p.order_id = o.id
+      WHERE o.order_number = ${input.orderNumber}
+        AND o.access_token_hash = ${hashSecret(input.accessToken)}
+      FOR UPDATE OF o, p
+    `;
+    if (!payment) throw new ApiError(404, "ORDER_NOT_FOUND", "Order not found.");
+    if (payment.payment_status === "SUCCEEDED") {
+      throw new ApiError(409, "PAYMENT_ALREADY_COMPLETE", "This order has already been paid.");
+    }
+    if (["REFUNDED"].includes(payment.payment_status)) {
+      throw new ApiError(409, "PAYMENT_NOT_REPORTABLE", "This payment can no longer be reviewed.");
+    }
+    const [existing] = await tx<{ id: string; claimed_receipt: string; status: string }[]>`
+      SELECT id, claimed_receipt, status::text FROM payment_investigations
+      WHERE payment_id = ${payment.payment_id} AND status IN ('OPEN', 'RECONCILING', 'MATCHED')
+      FOR UPDATE
+    `;
+    if (existing) {
+      if (existing.claimed_receipt !== input.receipt) {
+        throw new ApiError(409, "PAYMENT_REVIEW_ALREADY_OPEN", "A payment report is already being reviewed for this order.");
+      }
+      return { id: existing.id, status: existing.status, existing: true };
+    }
+    const [investigation] = await tx<{ id: string }[]>`
+      INSERT INTO payment_investigations (payment_id, order_id, customer_user_id, claimed_receipt, status)
+      VALUES (${payment.payment_id}, ${payment.order_id}, ${payment.user_id}, ${input.receipt}, 'OPEN')
+      RETURNING id
+    `;
+    await tx`
+      UPDATE payments SET status = 'RECONCILING', updated_at = now()
+      WHERE id = ${payment.payment_id} AND status <> 'SUCCEEDED'
+    `;
+    await tx`
+      INSERT INTO order_events (order_id, from_status, to_status, source, note, metadata)
+      VALUES (${payment.order_id}, ${payment.order_status}, ${payment.order_status}, 'customer-payment-report',
+        'Customer reported a completed M-Pesa payment that needs verification.', ${tx.json({ investigationId: investigation.id })})
+    `;
+    await publishAdminNotification(tx, {
+      eventType: "PAYMENT_INVESTIGATION",
+      entityType: "payment_investigation",
+      entityId: investigation.id,
+      severity: "CRITICAL",
+      title: "Payment needs review",
+      body: `${payment.order_number} was reported as paid but has not been confirmed.`,
+      href: "/admin/transactions",
+    });
+    return { id: investigation.id, status: "OPEN", existing: false };
+  });
+}
+
+export async function confirmPaymentInvestigation(
+  investigationId: string,
+  adminId: string,
+  input: z.infer<typeof confirmPaymentInvestigationSchema>,
+) {
+  const payerPhone = normalizeKenyanPhone(input.payerPhone);
+  if (input.paidAt.getTime() > Date.now() + 5 * 60_000) {
+    throw new ApiError(422, "INVALID_PAYMENT_TIME", "The M-Pesa payment time cannot be in the future.");
+  }
+  return withTransaction(async (tx) => {
+    const [record] = await tx<{
+      investigation_id: string;
+      investigation_status: string;
+      claimed_receipt: string;
+      payment_id: string;
+      payment_status: string;
+      amount_minor: number;
+      provider_receipt: string | null;
+      order_id: string;
+      order_number: string;
+      order_status: string;
+      order_created_at: Date;
+      customer_phone: string;
+      user_id: string | null;
+    }[]>`
+      SELECT i.id AS investigation_id, i.status::text AS investigation_status, i.claimed_receipt,
+             p.id AS payment_id, p.status::text AS payment_status, p.amount_minor, p.provider_receipt,
+             o.id AS order_id, o.order_number, o.status::text AS order_status, o.created_at AS order_created_at, o.customer_phone, o.user_id
+      FROM payment_investigations i
+      JOIN payments p ON p.id = i.payment_id
+      JOIN orders o ON o.id = i.order_id
+      WHERE i.id = ${investigationId}
+      FOR UPDATE OF i, p, o
+    `;
+    if (!record) throw new ApiError(404, "PAYMENT_REPORT_NOT_FOUND", "Payment report not found.");
+    if (record.investigation_status === "CONFIRMED" || record.payment_status === "SUCCEEDED") {
+      return { confirmed: true, orderNumber: record.order_number, existing: true };
+    }
+    if (["REJECTED", "CLOSED"].includes(record.investigation_status)) {
+      throw new ApiError(409, "PAYMENT_REPORT_CLOSED", "This payment report is closed.");
+    }
+    if (record.claimed_receipt !== input.receipt) {
+      throw new ApiError(422, "RECEIPT_EVIDENCE_MISMATCH", "Use the receipt code supplied in the customer report.");
+    }
+    if (record.amount_minor !== input.amountMinor || record.customer_phone !== payerPhone) {
+      throw new ApiError(422, "PAYMENT_EVIDENCE_MISMATCH", "The recorded amount and payer phone must match the order.");
+    }
+    if (input.paidAt.getTime() < record.order_created_at.getTime() - 5 * 60_000) {
+      throw new ApiError(422, "PAYMENT_TIME_MISMATCH", "The M-Pesa payment time must be after this order was created.");
+    }
+    const [receiptOwner] = await tx<{ payment_id: string }[]>`
+      SELECT id AS payment_id FROM payments
+      WHERE lower(provider_receipt) = lower(${input.receipt})
+      FOR UPDATE
+    `;
+    if (receiptOwner && receiptOwner.payment_id !== record.payment_id) {
+      await publishAdminNotification(tx, {
+        eventType: "DUPLICATE_MPESA_RECEIPT",
+        entityType: "payment_investigation",
+        entityId: record.investigation_id,
+        severity: "CRITICAL",
+        title: "M-Pesa receipt collision",
+        body: "The reported receipt is already attached to another payment.",
+        href: "/admin/transactions",
+      });
+      throw new ApiError(409, "RECEIPT_ALREADY_USED", "This M-Pesa receipt is already attached to another payment.");
+    }
+
+    await tx`
+      UPDATE payment_attempts SET status = 'CANCELLED', completed_at = now(),
+        result_description = 'Payment manually confirmed after evidence review.'
+      WHERE payment_id = ${record.payment_id} AND status = 'PENDING'
+    `;
+    const result = await settleSuccessfulPayment(tx, {
+      paymentId: record.payment_id,
+      orderId: record.order_id,
+      orderNumber: record.order_number,
+      orderStatus: record.order_status,
+      userId: record.user_id,
+      receipt: input.receipt,
+      payerPhone,
+      paidAt: input.paidAt,
+      source: "ADMIN_CONFIRMATION",
+      resultDescription: "Payment manually confirmed by an administrator after evidence review.",
+      adminId,
+      manualNote: input.note,
+    });
+    await tx`
+      UPDATE payment_investigations
+      SET status = 'CONFIRMED', reviewed_by = ${adminId}, reviewed_at = now(),
+          manual_paid_at = ${input.paidAt}, resolution_note = ${input.note}, updated_at = now()
+      WHERE id = ${record.investigation_id}
+    `;
+    await tx`
+      INSERT INTO admin_activity_logs (actor_user_id, action, entity_type, entity_id, metadata)
+      VALUES (${adminId}, 'payment.manually_confirmed', 'payment_investigation', ${record.investigation_id},
+        ${tx.json({ orderNumber: record.order_number, receipt: input.receipt, amountMinor: input.amountMinor, paidAt: input.paidAt.toISOString() })})
+    `;
+    await resolveAdminNotification(tx, "PAYMENT_INVESTIGATION", "payment_investigation", record.investigation_id);
+    return { confirmed: true, orderNumber: record.order_number, fulfilmentReview: !result.inventorySettled, existing: false };
   });
 }
 

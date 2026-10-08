@@ -18,6 +18,10 @@ const baseSchema = z.object({
   MPESA_CALLBACK_URL: optionalString(z.string().url()),
   MPESA_CALLBACK_TOKEN: optionalString(z.string().min(24)),
   MPESA_ACCOUNT_REFERENCE: z.string().min(1).max(12).default("TipsyTheory"),
+  MPESA_TRANSACTION_STATUS_INITIATOR: optionalString(z.string().min(1)),
+  MPESA_TRANSACTION_STATUS_SECURITY_CREDENTIAL: optionalString(z.string().min(1)),
+  MPESA_TRANSACTION_STATUS_RESULT_URL: optionalString(z.string().url()),
+  MPESA_TRANSACTION_STATUS_TIMEOUT_URL: optionalString(z.string().url()),
   OTP_PROVIDER_URL: optionalString(z.string().url()),
   OTP_PROVIDER_TOKEN: optionalString(z.string().min(1)),
   OTP_SENDER_ID: z.string().min(1).max(20).default("TipsyTheory"),
@@ -72,5 +76,29 @@ export function requireMpesaConfig() {
     transactionType: env.MPESA_TRANSACTION_TYPE,
     accountReference: env.MPESA_ACCOUNT_REFERENCE,
     callbackUrl: callbackUrl.toString(),
+  };
+}
+
+export function getMpesaTransactionStatusConfig() {
+  const env = getServerEnv();
+  const required = {
+    initiator: env.MPESA_TRANSACTION_STATUS_INITIATOR,
+    securityCredential: env.MPESA_TRANSACTION_STATUS_SECURITY_CREDENTIAL,
+    resultUrl: env.MPESA_TRANSACTION_STATUS_RESULT_URL,
+    timeoutUrl: env.MPESA_TRANSACTION_STATUS_TIMEOUT_URL,
+    callbackToken: env.MPESA_CALLBACK_TOKEN,
+    shortcode: env.MPESA_SHORTCODE,
+  };
+  if (Object.values(required).some((value) => !value)) return null;
+  const resultUrl = new URL(required.resultUrl!);
+  const timeoutUrl = new URL(required.timeoutUrl!);
+  resultUrl.searchParams.set("token", required.callbackToken!);
+  timeoutUrl.searchParams.set("token", required.callbackToken!);
+  return {
+    initiator: required.initiator!,
+    securityCredential: required.securityCredential!,
+    shortcode: required.shortcode!,
+    resultUrl: resultUrl.toString(),
+    timeoutUrl: timeoutUrl.toString(),
   };
 }

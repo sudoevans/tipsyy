@@ -716,12 +716,12 @@ export default function CheckoutExperience() {
     router.push("/");
   };
 
-  const verifyConfirmationCode = async (event: FormEvent<HTMLFormElement>) => {
+  const reportPaymentIssue = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const code = confirmationCode.replace(/\s/g, "").toUpperCase();
-    if (!/^[A-Z0-9]{10}$/.test(code)) {
+    if (!/^[A-Z0-9]{8,20}$/.test(code)) {
       setConfirmationCodeError(
-        "Invalid confirmation code. Check the code in your M-Pesa message.",
+        "Enter the receipt code from your M-Pesa message.",
       );
       return;
     }
@@ -729,8 +729,8 @@ export default function CheckoutExperience() {
     if (!checkoutSession) return;
     setIsCheckingCode(true);
     try {
-      const result = await responseData<{ receipt: string; paidAt: string }>(
-        await fetch("/api/v1/payments/mpesa/receipt", {
+      await responseData<{ id: string; status: string }>(
+        await fetch("/api/v1/payments/mpesa/report", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -740,24 +740,17 @@ export default function CheckoutExperience() {
           }),
         }),
       );
-      setPaymentReceipt({
-        code: result.receipt,
-        paidAt: new Intl.DateTimeFormat("en-KE", {
-          dateStyle: "medium",
-          timeStyle: "short",
-        }).format(new Date(result.paidAt)),
-      });
-      clearCompletedCart();
-      setStep("complete");
       setToast({
-        title: "Payment confirmed",
-        description: `Order ${checkoutSession.orderNumber} is confirmed.`,
+        title: "Payment reported",
+        description: "Our support team will review the M-Pesa receipt for this order.",
       });
+      setIsIssueOpen(false);
+      setConfirmationCode("");
     } catch (error) {
       setConfirmationCodeError(
         error instanceof Error
           ? error.message
-          : "We could not verify that code.",
+          : "We could not submit that payment report.",
       );
     } finally {
       setIsCheckingCode(false);
@@ -1140,7 +1133,7 @@ export default function CheckoutExperience() {
                   onClick={() => setIsIssueOpen(true)}
                   type="button"
                 >
-                  Payment issue?
+                  Report a payment issue
                 </button>
                 <button
                   className="text-sm font-semibold text-tipsy-muted underline decoration-tipsy-amber-500 decoration-2 underline-offset-4 disabled:opacity-60"
@@ -1663,14 +1656,17 @@ export default function CheckoutExperience() {
                 {isIssueOpen ? (
                   <form
                     className="mt-6 text-left"
-                    onSubmit={verifyConfirmationCode}
+                    onSubmit={reportPaymentIssue}
                   >
+                    <p className="mb-4 text-sm leading-5 text-tipsy-muted">
+                      If you approved the prompt and received an M-Pesa message, send its receipt code to support. We will review it against this order.
+                    </p>
                     <label className="grid gap-2 text-[13px] font-semibold">
-                      M-Pesa confirmation code
+                      M-Pesa receipt code
                       <input
                         autoCapitalize="characters"
                         className="h-11 rounded-xl border border-tipsy-line bg-white px-3.5 text-base font-normal tracking-[0.08em] uppercase transition outline-none focus:border-tipsy-amber-500 focus:ring-2 focus:ring-tipsy-amber-100"
-                        maxLength={10}
+                        maxLength={20}
                         onChange={(event) => {
                           setConfirmationCode(event.target.value.toUpperCase());
                           setConfirmationCodeError("");
@@ -1689,7 +1685,7 @@ export default function CheckoutExperience() {
                       disabled={isCheckingCode}
                       type="submit"
                     >
-                      {isCheckingCode ? "Checking code…" : "Verify payment"}
+                      {isCheckingCode ? "Sending report…" : "Report to support"}
                     </button>
                   </form>
                 ) : (
@@ -1699,7 +1695,7 @@ export default function CheckoutExperience() {
                       onClick={() => setIsIssueOpen(true)}
                       type="button"
                     >
-                      Payment issue?
+                      Report a payment issue
                     </button>
                     <button
                       className="text-sm font-semibold text-tipsy-muted underline decoration-tipsy-amber-500 decoration-2 underline-offset-4 transition hover:text-tipsy-ink disabled:opacity-60"

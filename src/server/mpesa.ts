@@ -1,5 +1,5 @@
 import { ApiError } from "./http";
-import { requireMpesaConfig } from "./env";
+import { getMpesaTransactionStatusConfig, requireMpesaConfig } from "./env";
 
 interface TokenResponse {
   access_token?: string;
@@ -121,4 +121,51 @@ export async function initiateStkPush(input: {
 export function mpesaCallbackMetadata(payload: StkCallbackPayload) {
   const items = payload.Body?.stkCallback?.CallbackMetadata?.Item ?? [];
   return Object.fromEntries(items.filter((item) => item.Name).map((item) => [item.Name, item.Value]));
+}
+
+export type TransactionStatusResultPayload = {
+  Result?: {
+    ResultCode?: number;
+    ResultDesc?: string;
+    OriginatorConversationID?: string;
+    ConversationID?: string;
+    TransactionID?: string;
+    ResultParameters?: { ResultParameter?: Array<{ Key?: string; Value?: string | number }> };
+  };
+};
+
+export async function requestMpesaTransactionStatus(input: {
+  receipt: string;
+  investigationId: string;
+}) {
+  const reconciliation = getMpesaTransactionStatusConfig();
+  if (!reconciliation) return null;
+  const payment = requireMpesaConfig();
+  const accessToken = await getMpesaAccessToken();
+  const request = {
+    Initiator: reconciliation.initiator,
+    SecurityCredential: reconciliation.securityCredential,
+    CommandID: "TransactionStatusQuery",
+    TransactionID: input.receipt,
+    PartyA: reconciliation.shortcode,
+    IdentifierType: "4",
+    ResultURL: reconciliation.resultUrl,
+    QueueTimeOutURL: reconciliation.timeoutUrl,
+    Remarks: "Tipsy payment reconciliation",
+    Occasion: input.investigationId,
+  };
+  const response = await fetch(`${apiBase(payment.environment)}/mpesa/transactionstatus/v1/query`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
+  });
+  const payload = await parseDarajaResponse<Record<string, unknown>>(response);
+  return { request: { ...request, SecurityCredential: "[REDACTED]" }, response: payload };
+}
+
+export function transactionStatusMetadata(payload: TransactionStatusResultPayload) {
+  const items = payload.Result?.ResultParameters?.ResultParameter ?? [];
+  return Object.fromEntries(items.filter((item) => item.Key).map((item) => [item.Key!, item.Value]));
 }
