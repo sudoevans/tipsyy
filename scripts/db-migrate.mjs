@@ -1,9 +1,12 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import nextEnv from "@next/env";
 import postgres from "postgres";
 
-const databaseUrl = process.env.DATABASE_URL ?? "postgresql://tipsy:tipsy_local_password@localhost:5432/tipsy";
+nextEnv.loadEnvConfig(process.cwd());
+
+const databaseUrl = process.env.DIRECT_URL ?? process.env.DATABASE_URL ?? "postgresql://tipsy:tipsy_local_password@localhost:5432/tipsy";
 const sql = postgres(databaseUrl, { max: 1, onnotice: () => undefined });
 const migrationsDir = path.join(process.cwd(), "db", "migrations");
 
@@ -22,4 +25,3 @@ for (const file of files) {
 }
 
 await sql.end();
-
