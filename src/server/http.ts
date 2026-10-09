@@ -31,12 +31,40 @@ export function apiSuccess<T>(data: T, init?: ResponseInit) {
   return NextResponse.json({ data }, init);
 }
 
-export function apiErrorResponse(error: unknown, requestId = crypto.randomUUID()) {
+function safeDatabaseDiagnostics(error: unknown) {
+  if (typeof error !== "object" || error === null) return {};
+  const fields = error as Record<string, unknown>;
+  const diagnostics: Record<string, string> = {};
+  const sqlState = fields.code;
+  if (typeof sqlState === "string" && /^[0-9A-Z]{5}$/.test(sqlState)) {
+    diagnostics.sqlState = sqlState;
+  }
+  for (const [source, target] of [
+    ["severity", "dbSeverity"],
+    ["schema_name", "dbSchema"],
+    ["table_name", "dbTable"],
+    ["column_name", "dbColumn"],
+    ["constraint_name", "dbConstraint"],
+  ] as const) {
+    const value = fields[source];
+    if (typeof value === "string" && /^[A-Za-z0-9_.-]{1,120}$/.test(value)) {
+      diagnostics[target] = value;
+    }
+  }
+  return diagnostics;
+}
+
+export function apiErrorResponse(
+  error: unknown,
+  requestId = crypto.randomUUID(),
+  route?: string,
+) {
   if (error instanceof ApiError) {
     console.warn(JSON.stringify({
       level: error.status >= 500 ? "error" : "warn",
       event: "api.error",
       requestId,
+      ...(route ? { route } : {}),
       status: error.status,
       code: error.code,
       errorType: error.name,
@@ -59,8 +87,10 @@ export function apiErrorResponse(error: unknown, requestId = crypto.randomUUID()
     level: "error",
     event: "api.unhandled_error",
     requestId,
+    ...(route ? { route } : {}),
     message: "Unhandled API error. See errorType; request and customer data are intentionally excluded.",
     errorName: error instanceof Error ? error.name : typeof error,
+    ...safeDatabaseDiagnostics(error),
   }));
   return NextResponse.json(
     { error: { code: "INTERNAL_ERROR", message: "Something went wrong. Please try again.", requestId } },

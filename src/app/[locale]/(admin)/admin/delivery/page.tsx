@@ -24,8 +24,8 @@ export default async function DeliveryPage() {
   >`
       SELECT id,name,address,latitude::float8,longitude::float8,active FROM store_locations ORDER BY active DESC,name
     `;
-  const [priceSetting] = await sql<{ amount_minor: number }[]>`
-    SELECT COALESCE((value->>'amount_minor')::integer,5000) AS amount_minor
+  const [priceSetting] = await sql<{ rate_per_km: number }[]>`
+    SELECT COALESCE((value->>'amount_ksh_per_km')::integer,50) AS rate_per_km
     FROM platform_settings WHERE key='delivery.price_per_km'
   `;
 
@@ -181,8 +181,8 @@ export default async function DeliveryPage() {
                 name="amount"
                 type="number"
                 min={0}
-                step={0.01}
-                defaultValue={(priceSetting?.amount_minor ?? 5000) / 100}
+                step={1}
+                defaultValue={priceSetting?.rate_per_km ?? 50}
                 required
               />
             </label>

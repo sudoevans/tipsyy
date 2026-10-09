@@ -45,14 +45,14 @@ export async function calculateDeliveryPrice(
       "Delivery is temporarily unavailable.",
     );
 
-  const [setting] = await tx<{ amount_minor: number }[]>`
-    SELECT COALESCE((value->>'amount_minor')::integer, 5000) AS amount_minor
+  const [setting] = await tx<{ rate_per_km: number }[]>`
+    SELECT COALESCE((value->>'amount_ksh_per_km')::integer, 50) AS rate_per_km
     FROM platform_settings WHERE key = 'delivery.price_per_km'
   `;
-  const rateMinor = setting?.amount_minor ?? 5000;
+  const ratePerKm = setting?.rate_per_km ?? 50;
   const chargedKilometres = Math.max(1, Math.ceil(nearest.distanceKm));
-  const feeMinor = chargedKilometres * rateMinor;
-  if (!Number.isSafeInteger(feeMinor) || feeMinor > 2_147_483_647) {
+  const feeKsh = chargedKilometres * ratePerKm;
+  if (!Number.isSafeInteger(feeKsh) || feeKsh > 2_147_483_647) {
     throw new ApiError(
       422,
       "DELIVERY_DISTANCE_INVALID",
@@ -63,7 +63,7 @@ export async function calculateDeliveryPrice(
     store: nearest.store,
     distanceKm: nearest.distanceKm,
     chargedKilometres,
-    rateMinor,
-    feeMinor,
+    ratePerKm,
+    feeKsh,
   };
 }

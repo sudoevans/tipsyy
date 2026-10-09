@@ -18,10 +18,10 @@ export async function POST(request: Request) {
     return apiSuccess({
       serviceable: true,
       area: { name: delivery.store.name },
-      deliveryFee: delivery.feeMinor,
+      deliveryFee: delivery.feeKsh,
       distanceKm: Math.round(delivery.distanceKm * 100) / 100,
       chargedKilometres: delivery.chargedKilometres,
-      ratePerKm: delivery.rateMinor,
+      ratePerKm: delivery.ratePerKm,
     });
   } catch (error) {
     return apiErrorResponse(error);

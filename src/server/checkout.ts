@@ -400,7 +400,7 @@ export async function createCheckoutOrder(
       items,
       subtotal,
     );
-    const total = subtotal - discount + deliveryPrice.feeMinor;
+    const total = subtotal - discount + deliveryPrice.feeKsh;
     const reservationExpiresAt = new Date(
       Date.now() + RESERVATION_MINUTES * 60_000,
     );
@@ -427,7 +427,7 @@ export async function createCheckoutOrder(
         coupon_code, reservation_expires_at
       ) VALUES (
         ${accessTokenHash}, ${customerUserId}, ${cartId ?? null}, ${deliveryPrice.store.id}, ${Math.round(deliveryPrice.distanceKm * 100) / 100}, ${input.customer.name.trim()}, ${phone}, ${tx.json(address)},
-        ${input.delivery.instructions ?? null}, ${subtotal}, ${discount}, ${deliveryPrice.feeMinor}, ${total},
+        ${input.delivery.instructions ?? null}, ${subtotal}, ${discount}, ${deliveryPrice.feeKsh}, ${total},
         ${input.couponCode?.toUpperCase() ?? null}, ${reservationExpiresAt}
       )
       RETURNING id, order_number, created_at
@@ -468,7 +468,7 @@ export async function createCheckoutOrder(
       entityType: "order",
       entityId: order.id,
       title: `New order ${order.order_number}`,
-      body: `New order ${order.order_number} for KSh ${(total / 100).toLocaleString("en-KE")} is awaiting payment.`,
+      body: `New order ${order.order_number} for KSh ${total.toLocaleString("en-KE")} is awaiting payment.`,
     });
     if (coupon) {
       await tx`
@@ -492,7 +492,7 @@ export async function createCheckoutOrder(
       currency: "KES",
       subtotal,
       discount,
-      deliveryFee: deliveryPrice.feeMinor,
+      deliveryFee: deliveryPrice.feeKsh,
       deliveryDistanceKm: Math.round(deliveryPrice.distanceKm * 100) / 100,
       total,
       reservationExpiresAt: reservationExpiresAt.toISOString(),
@@ -588,7 +588,7 @@ export async function quoteCart(input: z.infer<typeof cartQuoteSchema>) {
           input.delivery.longitude,
         )
       : null;
-    const deliveryFee = delivery?.feeMinor ?? 0;
+    const deliveryFee = delivery?.feeKsh ?? 0;
     return {
       currency: "KES",
       subtotal,
@@ -597,7 +597,7 @@ export async function quoteCart(input: z.infer<typeof cartQuoteSchema>) {
       deliveryDistanceKm: delivery
         ? Math.round(delivery.distanceKm * 100) / 100
         : null,
-      deliveryRatePerKm: delivery?.rateMinor ?? null,
+      deliveryRatePerKm: delivery?.ratePerKm ?? null,
       storeName: delivery?.store.name ?? null,
       total: subtotal - discount + deliveryFee,
     };

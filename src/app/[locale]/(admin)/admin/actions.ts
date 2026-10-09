@@ -689,12 +689,12 @@ export async function saveDeliveryArea(formData: FormData) {
 export async function saveDeliveryPricePerKm(formData: FormData) {
   const admin = await requireAdministrator();
   const input = z
-    .object({ amount: z.coerce.number().finite().nonnegative().max(100000) })
+    .object({ amount: z.coerce.number().int().finite().nonnegative().max(100000) })
     .parse({ amount: formData.get("amount") });
-  const amountMinor = Math.round(input.amount * 100);
+  const rateKshPerKm = Math.round(input.amount);
   await sql`
     INSERT INTO platform_settings (key,value,description,updated_by)
-    VALUES ('delivery.price_per_km',${JSON.stringify({ amount_minor: amountMinor })}::jsonb,'Delivery charge in KSh per started kilometre from the nearest active store.',${admin.id})
+    VALUES ('delivery.price_per_km',${JSON.stringify({ amount_ksh_per_km: rateKshPerKm })}::jsonb,'Delivery charge in KSh per started kilometre from the nearest active store.',${admin.id})
     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,description=EXCLUDED.description,updated_by=EXCLUDED.updated_by,updated_at=now()
   `;
   await audit(
@@ -702,7 +702,7 @@ export async function saveDeliveryPricePerKm(formData: FormData) {
     "delivery.price_per_km.updated",
     "platform_setting",
     "delivery.price_per_km",
-    { amountMinor },
+    { rateKshPerKm },
   );
   revalidatePath("/admin/delivery");
 }

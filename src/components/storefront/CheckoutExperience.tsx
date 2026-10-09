@@ -107,6 +107,7 @@ class CheckoutRequestError extends Error {
   constructor(
     message: string,
     readonly code?: string,
+    readonly requestId?: string,
   ) {
     super(message);
     this.name = "CheckoutRequestError";
@@ -116,12 +117,13 @@ class CheckoutRequestError extends Error {
 async function responseData<T>(response: Response): Promise<T> {
   const payload = (await response.json().catch(() => ({}))) as {
     data?: T;
-    error?: { code?: string; message?: string };
+    error?: { code?: string; message?: string; requestId?: string };
   };
   if (!response.ok || !payload.data)
     throw new CheckoutRequestError(
       payload.error?.message ?? "The request could not be completed.",
       payload.error?.code,
+      payload.error?.requestId ?? response.headers.get("x-request-id") ?? undefined,
     );
   return payload.data;
 }
@@ -774,9 +776,11 @@ export default function CheckoutExperience() {
       setToast({
         title: "Checkout needs attention",
         description:
-          error instanceof Error
-            ? error.message
-            : "Please review your details.",
+          error instanceof CheckoutRequestError
+            ? `${error.message}${error.requestId ? ` Support reference: ${error.requestId}.` : ""}`
+            : error instanceof Error
+              ? error.message
+              : "Please review your details.",
       });
     } finally {
       setIsAdvancingToPayment(false);

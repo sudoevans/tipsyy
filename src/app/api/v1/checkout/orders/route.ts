@@ -17,6 +17,6 @@ export async function POST(request: NextRequest) {
     const order = await createCheckoutOrder(input, cart.id);
     return apiSuccess(order, { status: 201 });
   } catch (error) {
-    return apiErrorResponse(error, requestId);
+    return apiErrorResponse(error, requestId, "/api/v1/checkout/orders");
   }
 }

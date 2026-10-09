@@ -7,7 +7,7 @@ export interface DeliveryLocationDetails {
   distanceKm?: number;
   chargedKilometres?: number;
   ratePerKm?: number;
-  feeMinor?: number;
+  feeKsh?: number;
 }
 
 interface ReverseGeocodeResponse {
@@ -110,6 +110,6 @@ export async function getCurrentDeliveryLocation(instructions = ""): Promise<Del
     distanceKm: payload.data.distanceKm,
     chargedKilometres: payload.data.chargedKilometres,
     ratePerKm: payload.data.ratePerKm,
-    feeMinor: payload.data.deliveryFee,
+    feeKsh: payload.data.deliveryFee,
   };
 }
