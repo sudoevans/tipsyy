@@ -89,7 +89,7 @@ export async function dispatchPendingNotifications(limit = 50) {
         ? "Telegram delivery failed. Check Workers logs and bot configuration."
         : error instanceof Error ? error.message.slice(0, 500) : "Notification delivery failed.";
       await sql`
-        UPDATE notifications SET status = ${attempts >= 5 ? "FAILED" : "PENDING"}, attempts = attempts + 1,
+        UPDATE notifications SET status = ${attempts >= 5 ? "FAILED" : "PENDING"}::notification_status, attempts = attempts + 1,
           scheduled_at = now() + make_interval(mins => LEAST(60, ${2 ** attempts})),
           locked_at = NULL, last_error = ${safeFailure} WHERE id = ${notification.id}
       `;

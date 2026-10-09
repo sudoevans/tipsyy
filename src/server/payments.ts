@@ -219,13 +219,13 @@ async function settleSuccessfulPayment(
   `;
   await tx`
     UPDATE orders
-    SET status = ${nextOrderStatus}, paid_at = ${input.paidAt},
+      SET status = ${nextOrderStatus}::order_status, paid_at = ${input.paidAt},
         confirmed_at = ${inventorySettled ? input.paidAt : null}, updated_at = now()
     WHERE id = ${input.orderId}
   `;
   await tx`
     INSERT INTO order_events (order_id, from_status, to_status, actor_user_id, source, note, metadata)
-    VALUES (${input.orderId}, ${input.orderStatus}, ${nextOrderStatus}, ${input.adminId ?? null},
+    VALUES (${input.orderId}, ${input.orderStatus}::order_status, ${nextOrderStatus}::order_status, ${input.adminId ?? null},
       ${input.source === "MPESA_CALLBACK" ? "mpesa-callback" : "admin-payment-confirmation"},
       ${input.resultDescription}, ${tx.json({ receipt: input.receipt, settlementSource: input.source })})
   `;
@@ -565,16 +565,16 @@ export async function checkPendingStkStatus(
     await releaseCouponForOrder(tx, current.order_id);
     await tx`
       UPDATE payment_attempts
-      SET status = ${resultStatus}, result_code = ${String(resultCode)},
+      SET status = ${resultStatus}::payment_status, result_code = ${String(resultCode)},
           result_description = ${resultDescription}, completed_at = now()
       WHERE id = ${attempt.attempt_id} AND status = 'PENDING'
     `;
     await tx`
-      UPDATE payments SET status = ${resultStatus}, raw_result = ${tx.json(queryPayload)}, updated_at = now()
+      UPDATE payments SET status = ${resultStatus}::payment_status, raw_result = ${tx.json(queryPayload)}, updated_at = now()
       WHERE id = ${current.payment_id} AND status = 'PENDING'
     `;
     await tx`
-      UPDATE orders SET status = ${orderStatus}, cancelled_at = now(), updated_at = now()
+      UPDATE orders SET status = ${orderStatus}::order_status, cancelled_at = now(), updated_at = now()
       WHERE id = ${current.order_id} AND status = 'PENDING_PAYMENT'
     `;
     await tx`
@@ -631,10 +631,10 @@ export async function cancelPendingOrderPayment(
       const note = "Customer cancelled the pending M-Pesa payment.";
       await tx`
         UPDATE payment_attempts
-        SET status = ${input.reason}, completed_at = now(), result_description = ${note}
+        SET status = ${input.reason}::payment_status, completed_at = now(), result_description = ${note}
         WHERE payment_id = ${payment.payment_id} AND status = 'PENDING'
       `;
-      await tx`UPDATE payments SET status = ${input.reason}, updated_at = now() WHERE id = ${payment.payment_id}`;
+      await tx`UPDATE payments SET status = ${input.reason}::payment_status, updated_at = now() WHERE id = ${payment.payment_id}`;
       await tx`
         UPDATE orders SET status = 'PAYMENT_CANCELLED', cancelled_at = now(), updated_at = now()
         WHERE id = ${payment.order_id}
@@ -830,11 +830,11 @@ export async function processMpesaCallback(payload: StkCallbackPayload) {
           callback_received_at = now(), completed_at = now()
         WHERE id = ${attempt.attempt_id}
       `;
-      await tx`UPDATE payments SET status = ${resultStatus}, raw_result = ${tx.json(serializedPayload)}, updated_at = now() WHERE id = ${attempt.payment_id}`;
-      await tx`UPDATE orders SET status = ${orderStatus}, cancelled_at = now(), updated_at = now() WHERE id = ${attempt.order_id}`;
+      await tx`UPDATE payments SET status = ${resultStatus}::payment_status, raw_result = ${tx.json(serializedPayload)}, updated_at = now() WHERE id = ${attempt.payment_id}`;
+      await tx`UPDATE orders SET status = ${orderStatus}::order_status, cancelled_at = now(), updated_at = now() WHERE id = ${attempt.order_id}`;
       await tx`
         INSERT INTO order_events (order_id, from_status, to_status, source, note, metadata)
-        VALUES (${attempt.order_id}, ${attempt.order_status}, ${orderStatus}, 'mpesa-callback', ${resultDescription}, ${tx.json({ resultCode })})
+        VALUES (${attempt.order_id}, ${attempt.order_status}::order_status, ${orderStatus}::order_status, 'mpesa-callback', ${resultDescription}, ${tx.json({ resultCode })})
       `;
       await tx`
         INSERT INTO notifications (user_id, order_id, channel, event_type, destination, subject, body)
@@ -897,7 +897,7 @@ export async function reportPaymentIssue(
     `;
     await tx`
       INSERT INTO order_events (order_id, from_status, to_status, source, note, metadata)
-      VALUES (${payment.order_id}, ${payment.order_status}, ${payment.order_status}, 'customer-payment-report',
+      VALUES (${payment.order_id}, ${payment.order_status}::order_status, ${payment.order_status}::order_status, 'customer-payment-report',
         'Customer reported a completed M-Pesa payment that needs verification.', ${tx.json({ investigationId: investigation.id })})
     `;
     await publishAdminNotification(tx, {

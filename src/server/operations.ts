@@ -152,12 +152,12 @@ export async function transitionOrder(
     }
 
     await tx`
-      UPDATE orders SET status = ${toStatus}, delivered_at = COALESCE(${deliveredAt}, delivered_at),
+      UPDATE orders SET status = ${toStatus}::order_status, delivered_at = COALESCE(${deliveredAt}, delivered_at),
         cancelled_at = COALESCE(${cancelledAt}, cancelled_at), updated_at = now() WHERE id = ${order.id}
     `;
     await tx`
       INSERT INTO order_events (order_id, from_status, to_status, actor_user_id, source, note)
-      VALUES (${order.id}, ${order.status}, ${toStatus}, ${actorUserId}, ${source}, ${note ?? null})
+      VALUES (${order.id}, ${order.status}::order_status, ${toStatus}::order_status, ${actorUserId}, ${source}, ${note ?? null})
     `;
     await tx`
       INSERT INTO notifications (user_id, order_id, channel, event_type, destination, subject, body)
@@ -244,7 +244,7 @@ export async function assignRider(
     await tx`UPDATE orders SET status = 'RIDER_ASSIGNED', updated_at = now() WHERE id = ${order.id}`;
     await tx`
       INSERT INTO order_events (order_id, from_status, to_status, actor_user_id, source, note, metadata)
-      VALUES (${order.id}, 'READY_FOR_PICKUP', 'RIDER_ASSIGNED', ${actorUserId}, 'admin', 'Rider assigned.', ${tx.json({ riderId })})
+      VALUES (${order.id}, 'READY_FOR_PICKUP'::order_status, 'RIDER_ASSIGNED'::order_status, ${actorUserId}, 'admin', 'Rider assigned.', ${tx.json({ riderId })})
     `;
     await recordAdminActivity(
       tx,
@@ -430,7 +430,7 @@ export async function updateRiderAssignment(
           ? "DELIVERED"
           : assignment.order_status;
     await tx`
-      UPDATE delivery_assignments SET status = ${assignmentStatus},
+      UPDATE delivery_assignments SET status = ${assignmentStatus}::assignment_status,
         accepted_at = CASE WHEN ${action} = 'ACCEPT' THEN now() ELSE accepted_at END,
         picked_up_at = CASE WHEN ${action} = 'PICKED_UP' THEN now() ELSE picked_up_at END,
         delivered_at = CASE WHEN ${action} = 'DELIVERED' THEN now() ELSE delivered_at END,
@@ -438,10 +438,10 @@ export async function updateRiderAssignment(
       WHERE id = ${assignment.id}
     `;
     if (orderStatus !== assignment.order_status) {
-      await tx`UPDATE orders SET status = ${orderStatus}, delivered_at = CASE WHEN ${action} = 'DELIVERED' THEN now() ELSE delivered_at END, updated_at = now() WHERE id = ${assignment.order_id}`;
+      await tx`UPDATE orders SET status = ${orderStatus}::order_status, delivered_at = CASE WHEN ${action} = 'DELIVERED' THEN now() ELSE delivered_at END, updated_at = now() WHERE id = ${assignment.order_id}`;
       await tx`
         INSERT INTO order_events (order_id, from_status, to_status, source, note)
-        VALUES (${assignment.order_id}, ${assignment.order_status}, ${orderStatus}, 'rider', ${action === "PICKED_UP" ? "Rider picked up the order." : "Rider completed the delivery."})
+        VALUES (${assignment.order_id}, ${assignment.order_status}::order_status, ${orderStatus}::order_status, 'rider', ${action === "PICKED_UP" ? "Rider picked up the order." : "Rider completed the delivery."})
       `;
     }
     if (action === "PICKED_UP" || action === "DELIVERED") {

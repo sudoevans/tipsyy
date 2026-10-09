@@ -91,7 +91,7 @@ export async function processMpesaTransactionStatusResult(payload: TransactionSt
     const isVerified = payload.Result?.ResultCode === 0 && Number.isFinite(amount) && amount === record.amount_minor && payerPhone === record.customer_phone;
     await tx`
       UPDATE payment_investigations
-      SET status = ${isVerified ? "MATCHED" : "RECONCILING"}, provider_result = ${tx.json(payload)},
+      SET status = ${isVerified ? "MATCHED" : "RECONCILING"}::payment_investigation_status, provider_result = ${tx.json(payload)},
           provider_checked_at = now(), provider_error = ${isVerified ? null : "The provider response did not conclusively match the expected amount and payer phone."}, updated_at = now()
       WHERE id = ${record.id}
     `;

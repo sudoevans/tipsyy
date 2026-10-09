@@ -136,7 +136,7 @@ export async function releaseOrderReservations(
     `;
     await tx`
       UPDATE inventory_reservations
-      SET status = ${status}, released_at = now()
+      SET status = ${status}::reservation_status, released_at = now()
       WHERE id = ${reservation.id}
     `;
   }
@@ -224,7 +224,7 @@ export async function releaseExpiredReservations(tx: Transaction) {
     `;
     if (!order) continue;
     await tx`
-      UPDATE payments SET status = ${promptWasSent ? "TIMED_OUT" : "CANCELLED"}, updated_at = now()
+      UPDATE payments SET status = ${promptWasSent ? "TIMED_OUT" : "CANCELLED"}::payment_status, updated_at = now()
       WHERE order_id = ${orderId} AND status = 'PENDING'
     `;
     await tx`
@@ -242,7 +242,7 @@ export async function releaseExpiredReservations(tx: Transaction) {
     await tx`
       INSERT INTO order_events (order_id, from_status, to_status, source, note)
       VALUES (
-        ${orderId}, 'PENDING_PAYMENT', 'PAYMENT_CANCELLED', 'reservation-expiry',
+        ${orderId}, 'PENDING_PAYMENT'::order_status, 'PAYMENT_CANCELLED'::order_status, 'reservation-expiry',
         ${promptWasSent
           ? "Stock reservation expired after an M-Pesa prompt was sent without a final payment result."
           : "Stock reservation expired before an M-Pesa prompt was sent."}
@@ -484,7 +484,7 @@ export async function createCheckoutOrder(
     `;
     await tx`
       INSERT INTO order_events (order_id, to_status, source, note, metadata)
-      VALUES (${order.id}, 'PENDING_PAYMENT', 'checkout', 'Order created and stock reserved.', ${tx.json({ reservationExpiresAt })})
+      VALUES (${order.id}, 'PENDING_PAYMENT'::order_status, 'checkout', 'Order created and stock reserved.', ${tx.json({ reservationExpiresAt })})
     `;
     await enqueueTelegramAlert(tx, {
       eventType: "ORDER_CREATED",
