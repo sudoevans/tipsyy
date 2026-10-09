@@ -31,6 +31,18 @@ export async function getCustomerProfile(userId: string) {
   return profile;
 }
 
+export async function getCustomerLoyalty(userId: string) {
+  const [[account], entries] = await Promise.all([
+    sql<{ points_balance: number }[]>`SELECT COALESCE(points_balance,0)::bigint AS points_balance FROM loyalty_accounts WHERE user_id=${userId}`,
+    sql<{ entry_type: string; points_delta: number; eligible_spend_minor: number | null; note: string | null; created_at: Date; order_number: string | null }[]>`
+      SELECT l.entry_type,l.points_delta,l.eligible_spend_minor,l.note,l.created_at,o.order_number
+      FROM loyalty_ledger l LEFT JOIN orders o ON o.id=l.order_id
+      WHERE l.user_id=${userId} ORDER BY l.created_at DESC LIMIT 50
+    `,
+  ]);
+  return { pointsBalance: account?.points_balance ?? 0, entries };
+}
+
 export async function updateCustomerProfile(userId: string, input: z.infer<typeof profileSchema>) {
   return withTransaction(async (tx) => {
     await tx`UPDATE users SET display_name = ${input.displayName}, updated_at = now() WHERE id = ${userId}`;
@@ -128,7 +140,7 @@ export async function listFavourites(userId: string) {
            GREATEST(0, i.on_hand_quantity - i.reserved_quantity)::int AS available_quantity
     FROM favourites f JOIN products p ON p.id = f.product_id
     JOIN product_variants pv ON pv.product_id = p.id AND pv.is_default = true
-    JOIN inventory i ON i.variant_id = pv.id
+    JOIN inventory i ON i.variant_id = pv.id AND i.storefront_enabled = true
     WHERE f.user_id = ${userId} ORDER BY f.created_at DESC
   `;
 }

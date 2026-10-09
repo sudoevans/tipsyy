@@ -1,10 +1,53 @@
 import { getServerEnv } from "./env";
-import { sql } from "./db";
+import { sql, type Database, type Transaction } from "./db";
 
 interface NotificationRow { id: string; channel: string; destination: string; subject: string | null; body: string; attempts: number }
 
+export const TELEGRAM_EVENTS = [
+  "ORDER_CREATED", "ORDER_PAID", "ORDER_CANCELLED", "ORDER_REFUNDED",
+  "DRIVER_ASSIGNED", "DRIVER_PICKED_UP", "DRIVER_DROPPED", "DRIVER_CANCELLED",
+  "INVENTORY_LOW_STOCK", "INVENTORY_OUT_OF_STOCK",
+] as const;
+
+export async function enqueueTelegramAlert(
+  tx: Transaction | Database,
+  input: { eventType: string; entityType: string; entityId: string; title: string; body: string },
+) {
+  if (!(TELEGRAM_EVENTS as readonly string[]).includes(input.eventType)) return;
+  const [setting] = await tx<{ value: { chatId?: string; events?: Record<string, boolean> } }[]>`
+    SELECT value FROM platform_settings WHERE key='notifications.telegram'
+  `;
+  const config = setting?.value;
+  if (!config?.chatId || !config.events?.[input.eventType]) return;
+  const dedupKey = `${input.eventType}:${input.entityType}:${input.entityId}`;
+  await tx`
+    INSERT INTO notifications(channel,event_type,destination,subject,body,dedup_key)
+    VALUES('TELEGRAM',${input.eventType},${config.chatId},${input.title},${input.body},${dedupKey})
+    ON CONFLICT(dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING
+  `;
+}
+
+export async function sendTelegramMessage(chatId: string, text: string) {
+  const token = getServerEnv().TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("Telegram is not configured. Add TELEGRAM_BOT_TOKEN to the Cloudflare secret store.");
+  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
+  const result = await response.json().catch(() => null) as { ok?: boolean; description?: string; result?: { message_id?: number } } | null;
+  if (!response.ok || !result?.ok) throw new Error(result?.description ?? `Telegram returned ${response.status}.`);
+  return result.result?.message_id ?? null;
+}
+
 async function deliver(notification: NotificationRow) {
   if (notification.channel === "IN_APP") return { providerMessageId: null };
+  if (notification.channel === "TELEGRAM") {
+    const providerMessageId = await sendTelegramMessage(notification.destination, [notification.subject, notification.body].filter(Boolean).join("\n"));
+    return { providerMessageId: providerMessageId === null ? null : String(providerMessageId) };
+  }
   const env = getServerEnv();
   if (notification.channel === "SMS" && env.OTP_PROVIDER_URL && env.OTP_PROVIDER_TOKEN) {
     const response = await fetch(env.OTP_PROVIDER_URL, {
@@ -42,10 +85,13 @@ export async function dispatchPendingNotifications(limit = 50) {
       sent += 1;
     } catch (error) {
       const attempts = notification.attempts + 1;
+      const safeFailure = notification.channel === "TELEGRAM"
+        ? "Telegram delivery failed. Check Workers logs and bot configuration."
+        : error instanceof Error ? error.message.slice(0, 500) : "Notification delivery failed.";
       await sql`
         UPDATE notifications SET status = ${attempts >= 5 ? "FAILED" : "PENDING"}, attempts = attempts + 1,
           scheduled_at = now() + make_interval(mins => LEAST(60, ${2 ** attempts})),
-          locked_at = NULL, last_error = ${error instanceof Error ? error.message : String(error)} WHERE id = ${notification.id}
+          locked_at = NULL, last_error = ${safeFailure} WHERE id = ${notification.id}
       `;
       failed += 1;
     }

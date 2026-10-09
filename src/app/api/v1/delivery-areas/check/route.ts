@@ -20,6 +20,7 @@ export async function POST(request: Request) {
       area: { name: delivery.store.name },
       deliveryFee: delivery.feeMinor,
       distanceKm: Math.round(delivery.distanceKm * 100) / 100,
+      chargedKilometres: delivery.chargedKilometres,
       ratePerKm: delivery.rateMinor,
     });
   } catch (error) {

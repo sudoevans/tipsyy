@@ -66,8 +66,9 @@ async function cartResponse(tx: Transaction, cartId: string) {
     quantity: number; price_minor: number; unit_price_snapshot_minor: number | null; available_quantity: number; active: boolean;
   }[]>`
     SELECT ci.id, p.slug AS product_slug, p.name, p.image_url, pv.size_label, ci.quantity,
-           pv.price_minor, ci.unit_price_snapshot_minor, GREATEST(0, i.on_hand_quantity - i.reserved_quantity)::int AS available_quantity,
-           (p.active AND pv.active) AS active
+           pv.price_minor, ci.unit_price_snapshot_minor,
+           CASE WHEN i.storefront_enabled THEN GREATEST(0, i.on_hand_quantity - i.reserved_quantity)::int ELSE 0 END AS available_quantity,
+           (p.active AND pv.active AND i.storefront_enabled) AS active
     FROM cart_items ci
     JOIN product_variants pv ON pv.id = ci.variant_id
     JOIN products p ON p.id = pv.product_id
@@ -111,8 +112,9 @@ export async function replaceCart(identity: CartIdentity, input: z.infer<typeof 
     const variants = slugs.length === 0 ? [] : await tx<{
       id: string; slug: string; available_quantity: number; active: boolean;
     }[]>`
-      SELECT pv.id, p.slug, GREATEST(0, i.on_hand_quantity - i.reserved_quantity)::int AS available_quantity,
-             (p.active AND pv.active) AS active
+      SELECT pv.id, p.slug,
+             CASE WHEN i.storefront_enabled THEN GREATEST(0, i.on_hand_quantity - i.reserved_quantity)::int ELSE 0 END AS available_quantity,
+             (p.active AND pv.active AND i.storefront_enabled) AS active
       FROM products p JOIN product_variants pv ON pv.product_id = p.id AND pv.is_default = true
       JOIN inventory i ON i.variant_id = pv.id
       WHERE p.slug IN (SELECT jsonb_array_elements_text(${JSON.stringify(slugs)}::text::jsonb))

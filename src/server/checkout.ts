@@ -4,6 +4,7 @@ import { evaluateInventoryNotifications } from "./admin-notifications";
 import { sql, type Transaction, withTransaction } from "./db";
 import { ApiError } from "./http";
 import { calculateDeliveryPrice } from "./delivery-pricing";
+import { enqueueTelegramAlert } from "./notifications";
 import {
   createOpaqueToken,
   hashSecret,
@@ -353,7 +354,7 @@ export async function createCheckoutOrder(
              i.on_hand_quantity, i.reserved_quantity
       FROM products p
       JOIN product_variants pv ON pv.product_id = p.id AND pv.is_default = true AND pv.active = true
-      JOIN inventory i ON i.variant_id = pv.id
+      JOIN inventory i ON i.variant_id = pv.id AND i.storefront_enabled = true
       WHERE p.active = true AND p.slug IN (SELECT jsonb_array_elements_text(${JSON.stringify(slugs)}::text::jsonb))
       FOR UPDATE OF i
     `;
@@ -462,6 +463,13 @@ export async function createCheckoutOrder(
       INSERT INTO order_events (order_id, to_status, source, note, metadata)
       VALUES (${order.id}, 'PENDING_PAYMENT', 'checkout', 'Order created and stock reserved.', ${tx.json({ reservationExpiresAt })})
     `;
+    await enqueueTelegramAlert(tx, {
+      eventType: "ORDER_CREATED",
+      entityType: "order",
+      entityId: order.id,
+      title: `New order ${order.order_number}`,
+      body: `New order ${order.order_number} for KSh ${(total / 100).toLocaleString("en-KE")} is awaiting payment.`,
+    });
     if (coupon) {
       await tx`
         UPDATE promotions SET usage_count = usage_count + 1, updated_at = now()
@@ -519,7 +527,7 @@ export async function getCatalog() {
     JOIN categories c ON c.id = p.category_id AND c.active = true
     LEFT JOIN brands b ON b.id = p.brand_id
     JOIN product_variants pv ON pv.product_id = p.id AND pv.is_default = true AND pv.active = true
-    JOIN inventory i ON i.variant_id = pv.id
+    JOIN inventory i ON i.variant_id = pv.id AND i.storefront_enabled = true
     WHERE p.active = true
     ORDER BY p.featured DESC, p.name
   `;
@@ -539,7 +547,7 @@ export async function quoteCart(input: z.infer<typeof cartQuoteSchema>) {
              p.image_url, p.category_id, pv.sku, pv.size_label, pv.price_minor,
              i.on_hand_quantity, i.reserved_quantity
       FROM products p JOIN product_variants pv ON pv.product_id = p.id AND pv.is_default = true AND pv.active = true
-      JOIN inventory i ON i.variant_id = pv.id
+      JOIN inventory i ON i.variant_id = pv.id AND i.storefront_enabled = true
       WHERE p.active = true AND p.slug IN (SELECT jsonb_array_elements_text(${JSON.stringify(slugs)}::text::jsonb))
     `;
     if (rows.length !== slugs.length)

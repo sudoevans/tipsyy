@@ -21,7 +21,7 @@ export default async function ProductDetailsPage({ params }: { params: Promise<{
     FROM products p
     JOIN categories c ON c.id = p.category_id
     JOIN product_variants pv ON pv.product_id = p.id AND pv.is_default = true AND pv.active = true
-    JOIN inventory i ON i.variant_id = pv.id
+    JOIN inventory i ON i.variant_id = pv.id AND i.storefront_enabled = true
     WHERE p.slug = ${id} AND p.active = true
   `;
 

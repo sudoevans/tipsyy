@@ -8,6 +8,7 @@ interface Props {
   onMessage: (title: string, description?: string) => void;
   orderNumber: string;
   phone: string;
+  estimatedPoints: number;
 }
 
 async function apiRequest<T>(url: string, body: unknown): Promise<T> {
@@ -17,7 +18,7 @@ async function apiRequest<T>(url: string, body: unknown): Promise<T> {
   return payload.data;
 }
 
-export default function PostPurchaseAccount({ accessToken, displayName, onMessage, orderNumber, phone }: Props) {
+export default function PostPurchaseAccount({ accessToken, displayName, onMessage, orderNumber, phone, estimatedPoints }: Props) {
   const [state, setState] = useState<"idle" | "sending" | "verify" | "verifying" | "complete">("idle");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -59,7 +60,7 @@ export default function PostPurchaseAccount({ accessToken, displayName, onMessag
   return <div className="mt-5 rounded-xl bg-tipsy-surface p-4 text-left">
     <p className="text-sm font-bold">Save this order</p>
     {state === "complete" ? <p className="mt-2 text-sm font-semibold text-tipsy-olive">Account created. You’re signed in.</p> : <>
-      <p className="mt-1 text-sm leading-5 text-tipsy-muted">Create an account with the phone number used for this order.</p>
+      <p className="mt-1 text-sm leading-5 text-tipsy-muted">Create an account with the phone number used for this order to save {estimatedPoints} estimated loyalty point{estimatedPoints === 1 ? "" : "s"}. Points are added after delivery.</p>
       {state === "verify" || state === "verifying" ? <div className="mt-3 flex gap-2">
         <input aria-label="Six-digit verification code" className="h-11 min-w-0 flex-1 rounded-xl border border-tipsy-line bg-white px-3 text-center tracking-[0.18em] outline-none focus:border-tipsy-amber-500" inputMode="numeric" maxLength={6} onChange={(event) => { setCode(event.target.value.replace(/\D/g, "")); setError(""); }} placeholder="000000" value={code} />
         <button className="h-11 rounded-xl bg-tipsy-ink px-4 text-sm font-semibold text-white disabled:opacity-60" disabled={state === "verifying"} onClick={() => void verifyCode()} type="button">{state === "verifying" ? "Checking…" : "Verify"}</button>

@@ -33,29 +33,37 @@ export function apiSuccess<T>(data: T, init?: ResponseInit) {
 
 export function apiErrorResponse(error: unknown, requestId = crypto.randomUUID()) {
   if (error instanceof ApiError) {
+    console.warn(JSON.stringify({
+      level: error.status >= 500 ? "error" : "warn",
+      event: "api.error",
+      requestId,
+      status: error.status,
+      code: error.code,
+      errorType: error.name,
+    }));
     return NextResponse.json(
       { error: { code: error.code, message: error.message, details: error.details, requestId } },
-      { status: error.status },
+      { status: error.status, headers: { "x-request-id": requestId } },
     );
   }
 
   if (error instanceof ZodError) {
+    console.warn(JSON.stringify({ level: "warn", event: "api.validation_error", requestId }));
     return NextResponse.json(
       { error: { code: "VALIDATION_ERROR", message: "Some submitted details are invalid.", details: error.flatten(), requestId } },
-      { status: 422 },
+      { status: 422, headers: { "x-request-id": requestId } },
     );
   }
 
   console.error(JSON.stringify({
     level: "error",
+    event: "api.unhandled_error",
     requestId,
-    message: "Unhandled API error",
+    message: "Unhandled API error. See errorType; request and customer data are intentionally excluded.",
     errorName: error instanceof Error ? error.name : typeof error,
-    errorMessage: error instanceof Error ? error.message : String(error),
-    error,
   }));
   return NextResponse.json(
     { error: { code: "INTERNAL_ERROR", message: "Something went wrong. Please try again.", requestId } },
-    { status: 500 },
+    { status: 500, headers: { "x-request-id": requestId } },
   );
 }

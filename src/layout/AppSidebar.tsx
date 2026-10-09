@@ -42,12 +42,11 @@ const operations: NavItem[] = [
   { label: "Inventory", path: "/admin/inventory", icon: <ListIcon />, badge: "inventory" },
   { label: "Customers", path: "/admin/customers", icon: <GroupIcon /> },
   { label: "Drivers", path: "/admin/riders", icon: <UserCircleIcon /> },
-  { label: "Delivery zones", path: "/admin/delivery", icon: <TaskIcon /> },
+  { label: "Delivery settings", path: "/admin/delivery", icon: <TaskIcon /> },
 ];
 
 const growth: NavItem[] = [
   { label: "Finance", path: "/admin/finance", icon: <DollarLineIcon /> },
-  { label: "Suppliers", path: "/admin/vendors", icon: <BoxCubeIcon /> },
   { label: "Promotions", path: "/admin/promotions", icon: <PageIcon /> },
   { label: "Store content", path: "/admin/content", icon: <PageIcon /> },
   { label: "Reports", path: "/admin/reports", icon: <PieChartIcon /> },

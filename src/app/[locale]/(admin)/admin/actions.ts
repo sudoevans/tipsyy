@@ -9,6 +9,7 @@ import { sql } from "@/server/db";
 import { evaluateInventoryNotifications } from "@/server/admin-notifications";
 import { hashPassword } from "@/server/admin-auth";
 import { redirect } from "next/navigation";
+import { sendTelegramMessage, TELEGRAM_EVENTS } from "@/server/notifications";
 
 async function requireAdministrator() {
   const cookieStore = await cookies();
@@ -175,23 +176,37 @@ export async function setCustomerStatus(
   revalidatePath("/admin/customers");
 }
 
-export async function updateInventory(variantId: string, formData: FormData) {
+export async function addInventoryStock(variantId: string, formData: FormData) {
   const admin = await requireAdministrator();
   const input = z
-    .object({ onHand: z.coerce.number().int().min(0) })
-    .parse({ onHand: formData.get("onHand") });
-  const [row] =
-    await sql`UPDATE inventory SET on_hand_quantity = ${input.onHand}, updated_at = now() WHERE variant_id = ${idSchema.parse(variantId)} AND reserved_quantity <= ${input.onHand} RETURNING variant_id`;
-  if (!row) throw new Error("On-hand stock cannot be below reserved stock.");
+    .object({ quantity: z.coerce.number().int().min(1).max(1_000_000) })
+    .parse({ quantity: formData.get("quantity") });
+  const id = idSchema.parse(variantId);
+  await sql.begin(async (tx) => {
+    const [row] = await tx<{ on_hand_quantity: number }[]>`
+      UPDATE inventory SET on_hand_quantity = on_hand_quantity + ${input.quantity}, updated_at = now()
+      WHERE variant_id = ${id}
+      RETURNING on_hand_quantity
+    `;
+    if (!row) throw new Error("This variant is not in inventory yet.");
+    const after = row.on_hand_quantity;
+    const before = after - input.quantity;
+    await tx`INSERT INTO inventory_movements(variant_id,actor_user_id,movement_type,quantity,on_hand_before,on_hand_after) VALUES(${id},${admin.id},'RESTOCK',${input.quantity},${before},${after})`;
+    await tx`INSERT INTO admin_activity_logs(actor_user_id,action,entity_type,entity_id,metadata) VALUES(${admin.id},'inventory.stock_added','product_variant',${id},${tx.json({ quantity: input.quantity, onHandBefore: before, onHandAfter: after })})`;
+  });
   await evaluateInventoryNotifications(sql);
-  await audit(
-    admin.id,
-    "inventory.updated",
-    "product_variant",
-    variantId,
-    input,
-  );
   revalidatePath("/admin/inventory");
+}
+
+export async function setInventoryStorefrontEnabled(variantId: string, enabled: boolean) {
+  const admin = await requireAdministrator();
+  const id = idSchema.parse(variantId);
+  const active = z.boolean().parse(enabled);
+  const [row] = await sql`UPDATE inventory SET storefront_enabled=${active},updated_at=now() WHERE variant_id=${id} RETURNING variant_id`;
+  if (!row) throw new Error("This variant is not in inventory.");
+  await audit(admin.id, active ? "inventory.storefront_enabled" : "inventory.storefront_disabled", "product_variant", id, { enabled: active });
+  revalidatePath("/admin/inventory");
+  revalidatePath("/");
 }
 
 export async function addInventoryItem(formData: FormData) {
@@ -205,15 +220,13 @@ export async function addInventoryItem(formData: FormData) {
       variantId: formData.get("variantId"),
       onHand: formData.get("onHand"),
     });
-  await sql`INSERT INTO inventory (variant_id,on_hand_quantity,low_stock_threshold) VALUES (${input.variantId},${input.onHand},COALESCE((SELECT (value->>'quantity')::int FROM platform_settings WHERE key='inventory.low_stock_threshold'),3)) ON CONFLICT (variant_id) DO UPDATE SET on_hand_quantity=GREATEST(${input.onHand},inventory.reserved_quantity),updated_at=now()`;
+  await sql.begin(async (tx) => {
+    const [row] = await tx<{ on_hand_quantity: number }[]>`INSERT INTO inventory (variant_id,on_hand_quantity,low_stock_threshold) VALUES (${input.variantId},${input.onHand},COALESCE((SELECT (value->>'quantity')::int FROM platform_settings WHERE key='inventory.low_stock_threshold'),3)) ON CONFLICT (variant_id) DO NOTHING RETURNING on_hand_quantity`;
+    if (!row) throw new Error("This variant is already in inventory. Use Add stock to replenish it.");
+    if (input.onHand > 0) await tx`INSERT INTO inventory_movements(variant_id,actor_user_id,movement_type,quantity,on_hand_before,on_hand_after) VALUES(${input.variantId},${admin.id},'INITIAL_STOCK',${input.onHand},0,${input.onHand})`;
+    await tx`INSERT INTO admin_activity_logs(actor_user_id,action,entity_type,entity_id,metadata) VALUES(${admin.id},'inventory.item_added','product_variant',${input.variantId},${tx.json(input)})`;
+  });
   await evaluateInventoryNotifications(sql);
-  await audit(
-    admin.id,
-    "inventory.item_added",
-    "product_variant",
-    input.variantId,
-    input,
-  );
   revalidatePath("/admin/inventory");
 }
 
@@ -254,6 +267,25 @@ export async function saveOperationsSettings(formData: FormData) {
   );
   revalidatePath("/admin/settings");
   revalidatePath("/admin/inventory");
+}
+
+export async function saveTelegramNotificationSettings(formData: FormData) {
+  const admin = await requireAdministrator();
+  const chatId = text(formData, "chatId");
+  if (!/^-?\d{5,20}$/.test(chatId)) throw new Error("Enter a valid Telegram group or chat ID.");
+  const selected = new Set(formData.getAll("events").map(String));
+  const events = Object.fromEntries(TELEGRAM_EVENTS.map((event) => [event, selected.has(event)]));
+  await sql`INSERT INTO platform_settings(key,value,description,updated_by) VALUES('notifications.telegram',${sql.json({ chatId, events })},'Telegram operations-chat destination and selected alert types.',${admin.id}) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_by=EXCLUDED.updated_by,updated_at=now()`;
+  await audit(admin.id, "settings.telegram_notifications_updated", "platform_settings", "notifications.telegram", { enabledEvents: [...selected] });
+  revalidatePath("/admin/settings");
+}
+
+export async function testTelegramConnection(chatId: string) {
+  const admin = await requireAdministrator();
+  const validChatId = z.string().regex(/^-?\d{5,20}$/).parse(chatId);
+  await sendTelegramMessage(validChatId, "TipsyAdmin Telegram notifications are connected.");
+  await audit(admin.id, "settings.telegram_connection_tested", "platform_settings", "notifications.telegram");
+  return { ok: true };
 }
 
 export async function createProduct(formData: FormData) {

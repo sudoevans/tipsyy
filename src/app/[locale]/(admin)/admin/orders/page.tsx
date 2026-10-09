@@ -29,8 +29,11 @@ export default async function OrdersPage({
         status: string;
         total_minor: number;
         created_at: Date;
+        payment_status: string | null;
+        payment_amount_minor: number;
+        refunded_minor: number;
       }[]
-    >`SELECT order_number,customer_name,customer_phone,status::text,total_minor,created_at FROM orders WHERE (${q}='' OR order_number ILIKE ${`%${q}%`} OR customer_name ILIKE ${`%${q}%`} OR customer_phone ILIKE ${`%${q}%`}) AND (${status}='all' OR status::text=${status}) ORDER BY created_at DESC LIMIT 100`,
+    >`SELECT o.order_number,o.customer_name,o.customer_phone,o.status::text,o.total_minor,o.created_at,p.status::text AS payment_status,COALESCE(p.amount_minor,0)::int AS payment_amount_minor,COALESCE(p.refunded_minor,0)::int AS refunded_minor FROM orders o LEFT JOIN payments p ON p.order_id=o.id WHERE (${q}='' OR o.order_number ILIKE ${`%${q}%`} OR o.customer_name ILIKE ${`%${q}%`} OR o.customer_phone ILIKE ${`%${q}%`}) AND (${status}='all' OR o.status::text=${status}) ORDER BY o.created_at DESC LIMIT 100`,
     sql<
       { id: string; display_name: string | null; phone: string | null }[]
     >`SELECT r.id,u.display_name,u.phone FROM riders r JOIN users u ON u.id=r.user_id WHERE u.status='ACTIVE' AND r.availability IN('ONLINE','BUSY') ORDER BY u.display_name NULLS LAST`,
@@ -88,6 +91,9 @@ export default async function OrdersPage({
           orderNumber={o.order_number}
           status={o.status}
           riders={availableRiders}
+          paymentStatus={o.payment_status}
+          paymentAmountMinor={o.payment_amount_minor}
+          refundedMinor={o.refunded_minor}
         />,
       ])}
     />

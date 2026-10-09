@@ -2,7 +2,6 @@
 import {
   ArchiveIcon,
   Copy01Icon,
-  DotsVerticalIcon,
   Edit01Icon,
   ImagePlusIcon,
   PlusIcon,
@@ -11,7 +10,6 @@ import {
   UploadCloud01Icon,
   XCloseIcon,
 } from "@untitledui/icons-react/outline";
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useState, useTransition } from "react";
 import {
@@ -23,6 +21,7 @@ import {
 import { useAdminToast } from "@/components/admin/AdminToast";
 import AdminPagination from "@/components/admin/AdminPagination";
 import AdminSelect from "@/components/admin/AdminSelect";
+import AdminTableActionsMenu from "@/components/admin/AdminTableActionsMenu";
 type Product = {
   id: string;
   name: string;
@@ -119,7 +118,7 @@ export default function ProductCatalog({
           <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">
             Products
           </h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Manage catalogue details, variants, prices, and visibility.
           </p>
         </div>
@@ -139,7 +138,7 @@ export default function ProductCatalog({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search product, variant or brand"
-              className="h-10 w-full rounded-lg border border-gray-300 py-2 pr-3 pl-10 text-sm outline-none focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900"
+              className="h-10 w-full rounded-lg border border-gray-300 py-2 pr-3 pl-10 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
             />
           </label>
           <div className="flex flex-wrap items-center gap-2">
@@ -185,7 +184,7 @@ export default function ProductCatalog({
           </div>
         </div>
         {selected.size ? (
-          <div className="flex items-center justify-between border-b border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-700">
+          <div className="flex items-center justify-between border-b border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-700 dark:border-brand-500/20 dark:bg-brand-500/10 dark:text-brand-200">
             <span className="font-medium">{selected.size} selected</span>
             <div className="flex gap-3">
               <button
@@ -212,8 +211,8 @@ export default function ProductCatalog({
           </div>
         ) : null}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-left text-sm">
-            <thead className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02]">
+          <table className="w-full min-w-[860px] text-left text-sm text-gray-700 dark:text-gray-300">
+            <thead className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
               <tr>
                 <th className="px-4 py-3">
                   <input
@@ -254,11 +253,10 @@ export default function ProductCatalog({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {products.map((product, index) => (
+              {products.map((product) => (
                 <ProductRow
                   key={product.id}
                   product={product}
-                  openUp={index >= products.length - 2}
                   selected={selected.has(product.id)}
                   onToggle={() =>
                     setSelected((current) => {
@@ -275,7 +273,7 @@ export default function ProductCatalog({
           </table>
         </div>
         {!products.length ? (
-          <p className="p-14 text-center text-sm text-gray-500">
+          <p className="p-14 text-center text-sm text-gray-500 dark:text-gray-400">
             No products match these filters.
           </p>
         ) : null}
@@ -307,7 +305,14 @@ function Head({
 }) {
   return (
     <th className="px-4 py-3">
-      <button onClick={onClick} className={active ? "text-brand-600" : ""}>
+      <button
+        onClick={onClick}
+        className={
+          active
+            ? "text-brand-600 dark:text-brand-400"
+            : "text-gray-600 dark:text-gray-300"
+        }
+      >
         {label} <span className="text-[10px]">↕</span>
       </button>
     </th>
@@ -315,13 +320,11 @@ function Head({
 }
 function ProductRow({
   product,
-  openUp,
   selected,
   onToggle,
   onRun,
 }: {
   product: Product;
-  openUp: boolean;
   selected: boolean;
   onToggle: () => void;
   onRun: (title: string, action: () => Promise<void>) => void;
@@ -331,7 +334,7 @@ function ProductRow({
   return (
     <tr
       onClick={open}
-      className="cursor-pointer hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"
+      className="cursor-pointer text-gray-700 hover:bg-gray-50/70 dark:text-gray-300 dark:hover:bg-white/[0.02]"
     >
       <td className="px-4 py-3">
         <input
@@ -349,7 +352,7 @@ function ProductRow({
             <span className="block max-w-64 truncate font-semibold text-gray-800 dark:text-white">
               {product.name}
             </span>
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-gray-500 dark:text-gray-400">
               {product.active ? "Published" : "Hidden"}
             </span>
           </span>
@@ -358,7 +361,7 @@ function ProductRow({
       <td className="px-4 py-3">{product.category}</td>
       <td className="px-4 py-3">{product.brand ?? "—"}</td>
       <td className="px-4 py-3">
-        <span className="font-medium text-brand-600">
+        <span className="font-medium text-brand-600 dark:text-brand-400">
           {product.variantCount} variant{product.variantCount === 1 ? "" : "s"}
         </span>
       </td>
@@ -373,43 +376,33 @@ function ProductRow({
         onClick={(event) => event.stopPropagation()}
         className="px-4 py-3 text-right"
       >
-        <details className="relative inline-block text-left">
-          <summary className="inline-flex size-9 cursor-pointer list-none items-center justify-center rounded-lg border border-gray-200 text-gray-500 [&::-webkit-details-marker]:hidden">
-            <DotsVerticalIcon className="size-4" />
-          </summary>
-          <div
-            className={`absolute right-0 z-20 w-36 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-theme-md dark:border-gray-700 dark:bg-gray-900 ${openUp ? "bottom-full mb-1" : "mt-1"}`}
-          >
-            <Link
-              href={`/admin/products/${product.id}`}
-              className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50"
-            >
-              <Edit01Icon className="size-4" />
-              Edit
-            </Link>
-            <button
-              onClick={() =>
-                onRun("Product duplicated", () => duplicateProduct(product.id))
-              }
-              className="flex w-full items-center gap-2 px-3 py-2 hover:bg-gray-50"
-            >
-              <Copy01Icon className="size-4" />
-              Duplicate
-            </button>
-            <button
-              onClick={() =>
+        <AdminTableActionsMenu
+          label={`Actions for ${product.name}`}
+          width={144}
+          items={[
+            {
+              label: "Edit",
+              href: `/admin/products/${product.id}`,
+              icon: <Edit01Icon className="size-4" />,
+            },
+            {
+              label: "Duplicate",
+              icon: <Copy01Icon className="size-4" />,
+              onSelect: () =>
+                onRun("Product duplicated", () => duplicateProduct(product.id)),
+            },
+            {
+              label: product.active ? "Archive" : "Publish",
+              tone: "danger",
+              icon: <ArchiveIcon className="size-4" />,
+              onSelect: () =>
                 onRun(
                   product.active ? "Product archived" : "Product published",
                   () => setProductActive(product.id, !product.active),
-                )
-              }
-              className="flex w-full items-center gap-2 px-3 py-2 text-error-600 hover:bg-error-50"
-            >
-              <ArchiveIcon className="size-4" />
-              {product.active ? "Archive" : "Publish"}
-            </button>
-          </div>
-        </details>
+                ),
+            },
+          ]}
+        />
       </td>
     </tr>
   );

@@ -4,6 +4,10 @@ export interface DeliveryLocationDetails {
   latitude: number;
   longitude: number;
   instructions: string;
+  distanceKm?: number;
+  chargedKilometres?: number;
+  ratePerKm?: number;
+  feeMinor?: number;
 }
 
 interface ReverseGeocodeResponse {
@@ -73,7 +77,14 @@ export async function getCurrentDeliveryLocation(instructions = ""): Promise<Del
     body: JSON.stringify({ latitude, longitude }),
   });
   const payload = await response.json().catch(() => null) as {
-    data?: { serviceable: boolean; area: { name: string } | null };
+    data?: {
+      serviceable: boolean;
+      area: { name: string } | null;
+      distanceKm?: number;
+      chargedKilometres?: number;
+      ratePerKm?: number;
+      deliveryFee?: number;
+    };
     error?: { message?: string };
   } | null;
   if (!response.ok || !payload?.data) {
@@ -90,5 +101,15 @@ export async function getCurrentDeliveryLocation(instructions = ""): Promise<Del
     // The precise coordinates remain attached to the order if address lookup is unavailable.
   }
 
-  return { area: payload.data.area.name, addressLine, latitude, longitude, instructions };
+  return {
+    area: payload.data.area.name,
+    addressLine,
+    latitude,
+    longitude,
+    instructions,
+    distanceKm: payload.data.distanceKm,
+    chargedKilometres: payload.data.chargedKilometres,
+    ratePerKm: payload.data.ratePerKm,
+    feeMinor: payload.data.deliveryFee,
+  };
 }

@@ -1,18 +1,17 @@
 "use client";
 
 import {
-  DotsVerticalIcon,
-  Edit01Icon,
+  PlusIcon,
   SearchLgIcon,
   Sliders04Icon,
   XCloseIcon,
 } from "@untitledui/icons-react/outline";
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { updateInventory } from "@/app/[locale]/(admin)/admin/actions";
+import { addInventoryStock, setInventoryStorefrontEnabled } from "@/app/[locale]/(admin)/admin/actions";
 import { useAdminToast } from "@/components/admin/AdminToast";
 import AdminPagination from "@/components/admin/AdminPagination";
+import AdminTableActionsMenu from "@/components/admin/AdminTableActionsMenu";
 import InventoryIntakeDialog from "@/components/admin/InventoryIntakeDialog";
 import Badge from "@/components/ui/badge/Badge";
 
@@ -26,6 +25,7 @@ type InventoryItem = {
   reserved: number;
   available: number;
   lowStockThreshold: number;
+  storefrontEnabled: boolean;
 };
 
 type CatalogueProduct = {
@@ -38,6 +38,8 @@ type Props = {
   items: InventoryItem[];
   catalogue: CatalogueProduct[];
   health: string;
+  sort: string;
+  direction: string;
   page: number;
   pageCount: number;
   total: number;
@@ -55,6 +57,8 @@ export default function InventoryCatalog({
   items,
   catalogue,
   health,
+  sort,
+  direction,
   page,
   pageCount,
   total,
@@ -63,8 +67,10 @@ export default function InventoryCatalog({
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const [query, setQuery] = useState(params.get("q") ?? "");
-  const [editing, setEditing] = useState<InventoryItem | null>(null);
+  const queryParam = params.get("q") ?? "";
+  const [query, setQuery] = useState(queryParam);
+  const [addingStock, setAddingStock] = useState<InventoryItem | null>(null);
+  const { showToast } = useAdminToast();
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRoot = useRef<HTMLDivElement>(null);
   const update = useCallback(
@@ -74,21 +80,22 @@ export default function InventoryCatalog({
         if (!value || value === "all") next.delete(key);
         else next.set(key, value);
       });
-      if (!values.page) next.set("page", "1");
+      next.set("page", "1");
       router.replace(`${pathname}?${next.toString()}`, { scroll: false });
     },
     [params, pathname, router],
   );
 
   useEffect(() => {
+    if (query === queryParam) return;
     const timer = window.setTimeout(() => {
-      if (query !== (params.get("q") ?? "")) update({ q: query });
-    }, 260);
+      update({ q: query.trim() });
+    }, 280);
     return () => window.clearTimeout(timer);
-  }, [query, params, update]);
+  }, [query, queryParam, update]);
 
   useEffect(() => {
-    const closeOnOutsideClick = (event: MouseEvent) => {
+    const closeOnOutsideClick = (event: PointerEvent) => {
       if (!filterRoot.current?.contains(event.target as Node)) {
         setFilterOpen(false);
       }
@@ -96,13 +103,18 @@ export default function InventoryCatalog({
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setFilterOpen(false);
     };
-    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("pointerdown", closeOnOutsideClick);
     document.addEventListener("keydown", closeOnEscape);
     return () => {
-      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, []);
+
+  const changeSort = (key: string) => {
+    const nextDirection = sort === key && direction === "asc" ? "desc" : "asc";
+    update({ sort: key, direction: nextDirection });
+  };
 
   return (
     <div className="space-y-5">
@@ -111,7 +123,7 @@ export default function InventoryCatalog({
           <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">
             Inventory
           </h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Add catalogue variants to inventory and manage their physical stock.
           </p>
         </div>
@@ -125,7 +137,7 @@ export default function InventoryCatalog({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search product, variant or SKU"
-              className="h-10 w-full rounded-lg border border-gray-300 py-2 pr-3 pl-10 text-sm transition outline-none focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900"
+              className="h-10 w-full rounded-lg border border-gray-300 py-2 pr-3 pl-10 text-sm text-gray-900 transition outline-none placeholder:text-gray-400 focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
             />
           </label>
           <div ref={filterRoot} className="relative shrink-0">
@@ -173,36 +185,36 @@ export default function InventoryCatalog({
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[940px] text-left text-sm">
-            <thead className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02]">
+          <table className="w-full min-w-[1160px] text-left text-sm text-gray-700 dark:text-gray-300">
+            <thead className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
               <tr>
-                <th className="px-5 py-3">Product</th>
-                <th className="px-5 py-3">Variant / SKU</th>
-                <th className="px-5 py-3 text-right">Reserved</th>
-                <th className="px-5 py-3 text-right">In stock</th>
-                <th className="px-5 py-3 text-right">Available</th>
-                <th className="px-5 py-3">Health</th>
+                <SortHeader label="Product" sortKey="product" sort={sort} direction={direction} onSort={changeSort} />
+                <SortHeader label="Variant" sortKey="variant" sort={sort} direction={direction} onSort={changeSort} />
+                <SortHeader label="SKU" sortKey="sku" sort={sort} direction={direction} onSort={changeSort} />
+                <SortHeader label="Reserved" sortKey="reserved" sort={sort} direction={direction} align="right" onSort={changeSort} />
+                <SortHeader label="In stock" sortKey="inStock" sort={sort} direction={direction} align="right" onSort={changeSort} />
+                <SortHeader label="Available" sortKey="available" sort={sort} direction={direction} align="right" onSort={changeSort} />
+                <SortHeader label="Health" sortKey="health" sort={sort} direction={direction} onSort={changeSort} />
+                <th className="px-5 py-3">Storefront</th>
                 <th className="px-5 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {items.map((item, index) => (
+              {items.map((item) => (
                 <tr
                   key={item.variantId}
-                  className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"
+                  className="text-gray-700 hover:bg-gray-50/70 dark:text-gray-300 dark:hover:bg-white/[0.02]"
                 >
                   <td className="px-5 py-4 font-semibold text-gray-800 dark:text-white">
                     {item.name}
                   </td>
                   <td className="px-5 py-4">
-                    <span className="block font-medium text-gray-700 dark:text-gray-200">
-                      {item.label}
-                    </span>
-                    <span className="font-mono text-xs text-gray-500">
-                      {item.sku}
-                    </span>
+                    <span className="font-medium text-gray-700 dark:text-gray-200">{item.label}</span>
                   </td>
-                  <td className="px-5 py-4 text-right text-gray-500">
+                  <td className="px-5 py-4 font-mono text-xs text-gray-500 dark:text-gray-400">
+                    {item.sku}
+                  </td>
+                  <td className="px-5 py-4 text-right text-gray-500 dark:text-gray-400">
                     {item.reserved}
                   </td>
                   <td className="px-5 py-4 text-right font-semibold text-gray-800 dark:text-white">
@@ -214,11 +226,24 @@ export default function InventoryCatalog({
                   <td className="px-5 py-4">
                     <HealthBadge item={item} />
                   </td>
+                  <td className="px-5 py-4">
+                    <Badge color={item.storefrontEnabled ? "success" : "light"} size="sm">
+                      {item.storefrontEnabled ? "Visible" : "Hidden"}
+                    </Badge>
+                  </td>
                   <td className="px-5 py-4 text-right">
                     <InventoryActions
                       item={item}
-                      openUp={index >= items.length - 2}
-                      onEdit={() => setEditing(item)}
+                      onAddStock={() => setAddingStock(item)}
+                      onToggleStorefront={async () => {
+                        try {
+                          await setInventoryStorefrontEnabled(item.variantId, !item.storefrontEnabled);
+                          showToast({ title: item.storefrontEnabled ? "Item hidden from storefront" : "Item visible on storefront", tone: "success" });
+                          router.refresh();
+                        } catch (error) {
+                          showToast({ title: "Could not update storefront visibility", description: error instanceof Error ? error.message : "Please try again.", tone: "error" });
+                        }
+                      }}
                     />
                   </td>
                 </tr>
@@ -227,7 +252,7 @@ export default function InventoryCatalog({
           </table>
         </div>
         {!items.length ? (
-          <p className="p-14 text-center text-sm text-gray-500">
+          <p className="p-14 text-center text-sm text-gray-500 dark:text-gray-400">
             No inventory matches this search or filter.
           </p>
         ) : null}
@@ -238,8 +263,8 @@ export default function InventoryCatalog({
           pageSize={pageSize}
         />
       </section>
-      {editing ? (
-        <EditStockDialog item={editing} onClose={() => setEditing(null)} />
+      {addingStock ? (
+        <AddStockDialog item={addingStock} onClose={() => setAddingStock(null)} />
       ) : null}
     </div>
   );
@@ -266,43 +291,63 @@ function HealthBadge({ item }: { item: InventoryItem }) {
   );
 }
 
-function InventoryActions({
-  item,
-  openUp,
-  onEdit,
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  direction,
+  align = "left",
+  onSort,
 }: {
-  item: InventoryItem;
-  openUp: boolean;
-  onEdit: () => void;
+  label: string;
+  sortKey: string;
+  sort: string;
+  direction: string;
+  align?: "left" | "right";
+  onSort: (key: string) => void;
 }) {
+  const active = sort === sortKey;
   return (
-    <details className="relative inline-block text-left">
-      <summary className="inline-flex size-9 cursor-pointer list-none items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-white/5 [&::-webkit-details-marker]:hidden">
-        <DotsVerticalIcon className="size-4" />
-      </summary>
-      <div
-        className={`absolute right-0 z-30 w-40 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-theme-md dark:border-gray-700 dark:bg-gray-900 ${openUp ? "bottom-full mb-1" : "mt-1"}`}
+    <th className={`px-5 py-3 ${align === "right" ? "text-right" : "text-left"}`}>
+      <button
+        aria-label={`Sort by ${label}${active ? `, currently ${direction === "asc" ? "ascending" : "descending"}` : ""}`}
+        className={`inline-flex items-center gap-1 ${active ? "text-brand-600" : "text-gray-500"}`}
+        onClick={() => onSort(sortKey)}
+        type="button"
       >
-        <button
-          type="button"
-          onClick={onEdit}
-          className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-white/5"
-        >
-          <Edit01Icon className="size-4" />
-          Edit stock
-        </button>
-        <Link
-          href={`/admin/products/${item.productId}`}
-          className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-white/5"
-        >
-          View product
-        </Link>
-      </div>
-    </details>
+        {label}<span aria-hidden="true">{active ? (direction === "asc" ? "↑" : "↓") : "↕"}</span>
+      </button>
+    </th>
   );
 }
 
-function EditStockDialog({
+function InventoryActions({
+  item,
+  onAddStock,
+  onToggleStorefront,
+}: {
+  item: InventoryItem;
+  onAddStock: () => void;
+  onToggleStorefront: () => void;
+}) {
+  return (
+    <AdminTableActionsMenu
+      label={`Inventory actions for ${item.name} ${item.label}`}
+      width={200}
+      items={[
+        {
+          label: "Add stock",
+          icon: <PlusIcon className="size-4" />,
+          onSelect: onAddStock,
+        },
+        { label: item.storefrontEnabled ? "Hide from storefront" : "Show on storefront", onSelect: onToggleStorefront },
+        { label: "View product", href: `/admin/products/${item.productId}` },
+      ]}
+    />
+  );
+}
+
+function AddStockDialog({
   item,
   onClose,
 }: {
@@ -312,19 +357,19 @@ function EditStockDialog({
   const router = useRouter();
   const { showToast } = useAdminToast();
   const [pending, startTransition] = useTransition();
-  const [inStock, setInStock] = useState(String(item.inStock));
+  const [quantity, setQuantity] = useState("");
   const save = () =>
     startTransition(async () => {
       try {
         const formData = new FormData();
-        formData.set("onHand", inStock);
-        await updateInventory(item.variantId, formData);
-        showToast({ title: "Stock updated", tone: "success" });
+        formData.set("quantity", quantity);
+        await addInventoryStock(item.variantId, formData);
+        showToast({ title: "Stock added", description: `${quantity} added to ${item.name} · ${item.label}.`, tone: "success" });
         onClose();
         router.refresh();
       } catch (error) {
         showToast({
-          title: "Could not update stock",
+          title: "Could not add stock",
           description:
             error instanceof Error
               ? error.message
@@ -344,12 +389,12 @@ function EditStockDialog({
         <div className="flex items-start justify-between border-b border-gray-100 p-5 dark:border-gray-800">
           <div>
             <h2
-              id="edit-stock-title"
+              id="add-stock-title"
               className="text-lg font-semibold text-gray-800 dark:text-white"
             >
-              Edit stock
+              Add stock
             </h2>
-            <p className="mt-1 text-sm text-gray-500">
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               {item.name} · {item.label}
             </p>
           </div>
@@ -368,15 +413,15 @@ function EditStockDialog({
             <input
               autoFocus
               type="number"
-              min={item.reserved}
-              value={inStock}
-              onChange={(event) => setInStock(event.target.value)}
+              min={1}
+              step={1}
+              value={quantity}
+              onChange={(event) => setQuantity(event.target.value)}
               className="field mt-1.5 h-11"
             />
           </label>
-          <p className="mt-2 text-xs leading-5 text-gray-500">
-            {item.reserved} currently reserved. In stock cannot be lower than
-            this amount.
+          <p className="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
+            Current in stock: {item.inStock}. After this restock: {item.inStock + (Number(quantity) || 0)}.
           </p>
         </div>
         <div className="flex justify-end gap-2 border-t border-gray-100 p-5 dark:border-gray-800">
@@ -391,10 +436,10 @@ function EditStockDialog({
           <button
             type="button"
             onClick={save}
-            disabled={pending || inStock === ""}
+            disabled={pending || !Number.isInteger(Number(quantity)) || Number(quantity) < 1}
             className="h-10 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {pending ? "Saving…" : "Save stock"}
+            {pending ? "Adding…" : "Add stock"}
           </button>
         </div>
       </div>

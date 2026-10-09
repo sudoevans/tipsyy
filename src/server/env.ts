@@ -25,6 +25,7 @@ const baseSchema = z.object({
   OTP_PROVIDER_URL: optionalString(z.string().url()),
   OTP_PROVIDER_TOKEN: optionalString(z.string().min(1)),
   OTP_SENDER_ID: z.string().min(1).max(20).default("TipsyTheory"),
+  TELEGRAM_BOT_TOKEN: optionalString(z.string().min(1)),
   GOOGLE_CLIENT_ID: optionalString(z.string().min(1)),
   GOOGLE_CLIENT_SECRET: optionalString(z.string().min(1)),
   INTERNAL_JOB_SECRET: optionalString(z.string().min(24)),

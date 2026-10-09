@@ -5,6 +5,7 @@ import { z } from "zod";
 import { sql, withTransaction } from "./db";
 import { getServerEnv } from "./env";
 import { ApiError } from "./http";
+import { claimPendingLoyaltyPoints } from "./loyalty";
 import { createNumericCode, createOpaqueToken, hashSecret, normalizeKenyanPhone, safeSecretEqual } from "./security";
 
 export const requestOtpSchema = z.object({
@@ -119,6 +120,7 @@ export async function verifyOtp(input: z.infer<typeof verifyOtpSchema>) {
       `;
       if (attached[0]) await tx`UPDATE notifications SET user_id = ${user.id} WHERE order_id = ${attached[0].id} AND user_id IS NULL`;
     }
+    await claimPendingLoyaltyPoints(tx, user.id, phone);
     return user;
   });
 }

@@ -6,6 +6,7 @@ import {
   releaseOrderReservations,
 } from "./checkout";
 import { evaluateInventoryNotifications, publishAdminNotification, resolveAdminNotification } from "./admin-notifications";
+import { enqueueTelegramAlert } from "./notifications";
 import { sql, type Transaction, withTransaction } from "./db";
 import { ApiError } from "./http";
 import {
@@ -170,6 +171,7 @@ async function settleSuccessfulPayment(
     receipt: string;
     payerPhone: string;
     paidAt: Date;
+    amountMinor: number;
     source: "MPESA_CALLBACK" | "ADMIN_CONFIRMATION";
     resultDescription: string;
     callbackPayload?: unknown;
@@ -224,6 +226,13 @@ async function settleSuccessfulPayment(
     VALUES (${input.userId}, ${input.orderId}, 'SMS', 'PAYMENT_SUCCESSFUL', ${input.payerPhone}, 'Payment received',
       ${`M-Pesa payment ${input.receipt} was received.`})
   `;
+  await enqueueTelegramAlert(tx, {
+    eventType: "ORDER_PAID",
+    entityType: "order",
+    entityId: input.orderId,
+    title: `Payment received · ${input.orderNumber}`,
+    body: `${input.orderNumber} payment confirmed for KSh ${(input.amountMinor / 100).toLocaleString("en-KE")}.`,
+  });
 
   if (inventorySettled) {
     await publishAdminNotification(tx, {
@@ -614,6 +623,7 @@ export async function processMpesaCallback(payload: StkCallbackPayload) {
         receipt: receipt.toUpperCase(),
         payerPhone: callbackPhone ?? attempt.customer_phone,
         paidAt,
+        amountMinor: attempt.amount_minor,
         source: "MPESA_CALLBACK",
         resultDescription,
         callbackPayload: serializedPayload,
@@ -795,6 +805,7 @@ export async function confirmPaymentInvestigation(
       receipt: input.receipt,
       payerPhone,
       paidAt: input.paidAt,
+      amountMinor: record.amount_minor,
       source: "ADMIN_CONFIRMATION",
       resultDescription: "Payment manually confirmed by an administrator after evidence review.",
       adminId,

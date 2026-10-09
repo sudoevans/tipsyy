@@ -1131,11 +1131,6 @@ export default function CheckoutExperience() {
                   <p className="mt-1 truncate text-[14px] text-tipsy-muted">
                     {deliveryAddress || "Location not set"}
                   </p>
-                  {deliveryLocation ? (
-                    <p className="mt-0.5 text-xs text-tipsy-muted">
-                      Delivery area: {deliveryLocation}
-                    </p>
-                  ) : null}
                 </div>
                 <button
                   className="shrink-0 text-[13px] font-semibold underline decoration-tipsy-amber-500 decoration-2 underline-offset-4 disabled:opacity-60"
@@ -1333,6 +1328,7 @@ export default function CheckoutExperience() {
                 }
                 orderNumber={checkoutSession.orderNumber}
                 phone={customer.phone}
+                estimatedPoints={Math.floor(Math.max(0, checkoutSession.subtotal - checkoutSession.discount) / 10_000)}
               />
               <button
                 className="mt-7 h-13 w-full rounded-xl bg-tipsy-amber-500 text-[16px] font-semibold"
@@ -1602,11 +1598,6 @@ export default function CheckoutExperience() {
                       <p className="mt-1 truncate text-[15px] font-semibold text-tipsy-ink">
                         {deliveryAddress || "Location not set"}
                       </p>
-                      {deliveryLocation ? (
-                        <p className="mt-0.5 text-xs text-tipsy-muted">
-                          Delivery area: {deliveryLocation}
-                        </p>
-                      ) : null}
                     </div>
                     <button
                       aria-label="Update current location"
@@ -1926,6 +1917,7 @@ export default function CheckoutExperience() {
                   }
                   orderNumber={checkoutSession.orderNumber}
                   phone={customer.phone}
+                  estimatedPoints={Math.floor(Math.max(0, checkoutSession.subtotal - checkoutSession.discount) / 10_000)}
                 />
                 <button
                   className="mt-6 h-12 w-full rounded-xl bg-tipsy-amber-500 px-5 text-sm font-bold text-tipsy-ink transition hover:bg-tipsy-amber-300"

@@ -1,6 +1,5 @@
 "use client";
 
-import { ThemeToggleButton } from "@/components/common/ThemeToggleButton";
 import { useAdminNotifications } from "@/components/admin/AdminNotificationsProvider";
 import { useSidebar } from "@/context/SidebarContext";
 import { ChevronDownIcon } from "@/icons";
@@ -39,7 +38,6 @@ export default function AppHeader({ displayName, role }: { displayName?: string 
         </div>
 
         <div className="flex items-center gap-2 2xsm:gap-3">
-          <ThemeToggleButton />
           <div className="relative">
             <button aria-expanded={notificationsOpen} aria-haspopup="dialog" aria-label="Notifications" className="relative flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800" onClick={() => { setNotificationsOpen((open) => !open); void refresh(); }} type="button">
               <Bell01Icon className="size-5" strokeWidth={1.8} />

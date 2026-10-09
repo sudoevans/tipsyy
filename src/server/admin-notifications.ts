@@ -1,4 +1,5 @@
 import { sql, type Database, type Transaction } from "./db";
+import { enqueueTelegramAlert } from "./notifications";
 
 type NotificationSeverity = "INFO" | "WARNING" | "CRITICAL";
 
@@ -75,6 +76,13 @@ export async function evaluateInventoryNotifications(tx: Transaction | Database)
       title: isOut ? "Product is out of stock" : "Low stock alert",
       body: `${item.product_name}${item.size_label ? ` — ${item.size_label}` : ""} has ${item.available} unit${item.available === 1 ? "" : "s"} available.`,
       href: "/admin/inventory",
+    });
+    await enqueueTelegramAlert(tx, {
+      eventType,
+      entityType: "inventory_variant",
+      entityId: item.variant_id,
+      title: isOut ? "Out of stock" : "Low stock",
+      body: `${item.product_name}${item.size_label ? ` · ${item.size_label}` : ""}: ${item.available} available.`,
     });
     await resolveAdminNotification(
       tx,

@@ -77,7 +77,25 @@ type DeliveryRow = {
   delivered_at: Date | null;
 };
 
-export default async function RidersPage() {
+const fleetPageSize = 10;
+
+type FleetRow = {
+  registration: string;
+  vehicle_type: string;
+  make_model: string | null;
+  rider: string | null;
+  status: string;
+  insurance_expires_at: Date | null;
+  service_due_at: Date | null;
+};
+
+export default async function RidersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ fleetPage?: string }>;
+}) {
+  const params = await searchParams;
+  const requestedFleetPage = Math.max(1, Number.parseInt(params.fleetPage ?? "1", 10) || 1);
   const [
     drivers,
     deliveries,
@@ -85,6 +103,7 @@ export default async function RidersPage() {
     [payoutSummary],
     pendingPayments,
     pendingPaymentOrders,
+    [fleetCount],
   ] = await Promise.all([
     sql<DriverRow[]>`
       SELECT r.id,u.display_name,u.phone,u.status::text AS user_status,r.availability::text,
@@ -171,7 +190,21 @@ export default async function RidersPage() {
         AND da.delivered_at IS NOT NULL
       ORDER BY da.delivered_at DESC
     `,
+    sql<{ count: number }[]>`SELECT COUNT(*)::int AS count FROM fleet_vehicles`,
   ]);
+
+  const fleetTotal = fleetCount?.count ?? 0;
+  const fleetPageCount = Math.max(1, Math.ceil(fleetTotal / fleetPageSize));
+  const fleetPage = Math.min(requestedFleetPage, fleetPageCount);
+  const fleet = await sql<FleetRow[]>`
+    SELECT f.registration,f.vehicle_type,f.make_model,u.display_name AS rider,f.status,
+           f.insurance_expires_at,f.service_due_at
+    FROM fleet_vehicles f
+    LEFT JOIN riders r ON r.id=f.rider_id
+    LEFT JOIN users u ON u.id=r.user_id
+    ORDER BY f.registration
+    LIMIT ${fleetPageSize} OFFSET ${(fleetPage - 1) * fleetPageSize}
+  `;
 
   const orderKey = (riderId: string, periodStart: Date | string) =>
     `${riderId}:${new Date(periodStart).toISOString().slice(0, 10)}`;
@@ -257,6 +290,19 @@ export default async function RidersPage() {
           deliveredAt: order.delivered_at.toISOString(),
         })),
       }))}
+      fleet={fleet.map((vehicle) => ({
+        registration: vehicle.registration,
+        vehicleType: vehicle.vehicle_type,
+        makeModel: vehicle.make_model,
+        rider: vehicle.rider,
+        status: vehicle.status,
+        insuranceExpiresAt: vehicle.insurance_expires_at?.toISOString() ?? null,
+        serviceDueAt: vehicle.service_due_at?.toISOString() ?? null,
+      }))}
+      fleetPage={fleetPage}
+      fleetPageCount={fleetPageCount}
+      fleetTotal={fleetTotal}
+      fleetPageSize={fleetPageSize}
     />
   );
 }

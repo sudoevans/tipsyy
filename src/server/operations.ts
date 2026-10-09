@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { sql, type Transaction, withTransaction } from "./db";
 import { ApiError } from "./http";
+import { awardDeliveredOrderPoints } from "./loyalty";
+import { enqueueTelegramAlert } from "./notifications";
 
 const transitions: Record<string, string[]> = {
   CONFIRMED: ["PREPARING", "CANCELLED"],
@@ -9,8 +11,7 @@ const transitions: Record<string, string[]> = {
   READY_FOR_PICKUP: ["RIDER_ASSIGNED", "CANCELLED"],
   RIDER_ASSIGNED: ["OUT_FOR_DELIVERY", "CANCELLED"],
   OUT_FOR_DELIVERY: ["DELIVERED"],
-  PAID: ["CONFIRMED", "REFUNDED"],
-  DELIVERED: ["REFUNDED"],
+  PAID: ["CONFIRMED"],
 };
 
 export const transitionOrderSchema = z.object({
@@ -22,7 +23,6 @@ export const transitionOrderSchema = z.object({
     "OUT_FOR_DELIVERY",
     "DELIVERED",
     "CANCELLED",
-    "REFUNDED",
   ]),
   note: z.string().trim().max(500).optional(),
 });
@@ -67,9 +67,11 @@ export async function transitionOrder(
         user_id: string | null;
         customer_phone: string;
         delivery_fee_minor: number;
+        subtotal_minor: number;
+        discount_minor: number;
       }[]
     >`
-      SELECT id, status, user_id, customer_phone, delivery_fee_minor
+      SELECT id, status, user_id, customer_phone, delivery_fee_minor, subtotal_minor, discount_minor
       FROM orders WHERE order_number = ${orderNumber} FOR UPDATE
     `;
     if (!order) throw new ApiError(404, "ORDER_NOT_FOUND", "Order not found.");
@@ -139,6 +141,13 @@ export async function transitionOrder(
       ) {
         await tx`UPDATE delivery_assignments SET status = 'CANCELLED' WHERE id = ${assignment.id}`;
         await tx`UPDATE riders SET availability = 'ONLINE', updated_at = now() WHERE id = ${assignment.rider_id}`;
+        await enqueueTelegramAlert(tx, {
+          eventType: "DRIVER_CANCELLED",
+          entityType: "delivery_assignment",
+          entityId: assignment.id,
+          title: `Delivery cancelled · ${orderNumber}`,
+          body: `The delivery assignment for ${orderNumber} was cancelled.`,
+        });
       }
     }
 
@@ -155,6 +164,14 @@ export async function transitionOrder(
       VALUES (${order.user_id}, ${order.id}, 'IN_APP', ${`ORDER_${toStatus}`}, ${order.customer_phone}, ${toStatus.replaceAll("_", " ")},
         ${`Order ${orderNumber} is now ${toStatus.replaceAll("_", " ").toLowerCase()}.`})
     `;
+    if (toStatus === "DELIVERED") await awardDeliveredOrderPoints(tx, order);
+    await enqueueTelegramAlert(tx, {
+      eventType: toStatus === "CANCELLED" ? "ORDER_CANCELLED" : toStatus === "DELIVERED" ? "DRIVER_DROPPED" : `ORDER_${toStatus}`,
+      entityType: "order",
+      entityId: order.id,
+      title: `Order ${orderNumber}`,
+      body: `Order ${orderNumber} changed from ${order.status.replaceAll("_", " ")} to ${toStatus.replaceAll("_", " ")}.`,
+    });
     if (source === "admin") {
       await recordAdminActivity(
         tx,
@@ -241,12 +258,79 @@ export async function assignRider(
         payoutMinor: order.delivery_fee_minor,
       },
     );
+    await enqueueTelegramAlert(tx, {
+      eventType: "DRIVER_ASSIGNED",
+      entityType: "delivery_assignment",
+      entityId: assignment.id,
+      title: `Driver assigned · ${orderNumber}`,
+      body: `A driver was assigned to ${orderNumber}.`,
+    });
     return {
       assignmentId: assignment.id,
       orderNumber,
       riderId,
       status: "ASSIGNED",
     };
+  });
+}
+
+export const manualRefundSchema = z.object({
+  amountMinor: z.number().int().positive(),
+  providerReference: z.string().trim().max(80).optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+export async function recordManualRefund(
+  orderNumber: string,
+  actorUserId: string,
+  input: z.infer<typeof manualRefundSchema>,
+) {
+  return withTransaction(async (tx) => {
+    const [payment] = await tx<{
+      payment_id: string;
+      order_id: string;
+      status: string;
+      amount_minor: number;
+      refunded_minor: number;
+      order_status: string;
+    }[]>`
+      SELECT p.id AS payment_id,p.order_id,p.status::text,p.amount_minor,p.refunded_minor,o.status::text AS order_status
+      FROM payments p JOIN orders o ON o.id=p.order_id
+      WHERE o.order_number=${orderNumber}
+      FOR UPDATE OF p,o
+    `;
+    if (!payment) throw new ApiError(404, "PAYMENT_NOT_FOUND", "No payment is recorded for this order.");
+    if (payment.status !== "SUCCEEDED" && payment.status !== "REFUNDED") {
+      throw new ApiError(409, "PAYMENT_NOT_REFUNDABLE", "Only a successful payment can be refunded.");
+    }
+    const remaining = payment.amount_minor - payment.refunded_minor;
+    if (input.amountMinor > remaining) {
+      throw new ApiError(422, "REFUND_EXCEEDS_PAYMENT", `Only KSh ${(remaining / 100).toLocaleString("en-KE")} remains refundable.`);
+    }
+    const [refund] = await tx<{ id: string }[]>`
+      INSERT INTO payment_refunds(payment_id,amount_minor,provider_reference,note,recorded_by)
+      VALUES(${payment.payment_id},${input.amountMinor},${input.providerReference || null},${input.note || null},${actorUserId})
+      RETURNING id
+    `;
+    const refunded = payment.refunded_minor + input.amountMinor;
+    const fullyRefunded = refunded >= payment.amount_minor;
+    await tx`UPDATE payments SET refunded_minor=${refunded},status=${fullyRefunded ? "REFUNDED" : "SUCCEEDED"},updated_at=now() WHERE id=${payment.payment_id}`;
+    await recordAdminActivity(tx, actorUserId, "payment.refund_recorded", "payment_refund", refund.id, {
+      orderNumber,
+      amountMinor: input.amountMinor,
+      refundedMinor: refunded,
+      paymentStatus: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
+      providerReference: input.providerReference ?? null,
+      note: input.note ?? null,
+    });
+    await enqueueTelegramAlert(tx, {
+      eventType: "ORDER_REFUNDED",
+      entityType: "payment_refund",
+      entityId: refund.id,
+      title: `Refund recorded · ${orderNumber}`,
+      body: `A KSh ${(input.amountMinor / 100).toLocaleString("en-KE")} refund was recorded for ${orderNumber}.`,
+    });
+    return { refundId: refund.id, orderNumber, refundedMinor: refunded, remainingMinor: payment.amount_minor - refunded, orderStatus: payment.order_status };
   });
 }
 
@@ -304,9 +388,14 @@ export async function updateRiderAssignment(
         order_number: string;
         order_status: string;
         delivery_fee_minor: number;
+        user_id: string | null;
+        customer_phone: string;
+        subtotal_minor: number;
+        discount_minor: number;
       }[]
     >`
-      SELECT da.id, da.status, da.order_id, o.order_number, o.status AS order_status, o.delivery_fee_minor
+      SELECT da.id, da.status, da.order_id, o.order_number, o.status AS order_status, o.delivery_fee_minor,
+             o.user_id,o.customer_phone,o.subtotal_minor,o.discount_minor
       FROM delivery_assignments da JOIN orders o ON o.id = da.order_id
       WHERE da.id = ${assignmentId} AND da.rider_id = ${riderId} FOR UPDATE OF da, o
     `;
@@ -355,7 +444,17 @@ export async function updateRiderAssignment(
         VALUES (${assignment.order_id}, ${assignment.order_status}, ${orderStatus}, 'rider', ${action === "PICKED_UP" ? "Rider picked up the order." : "Rider completed the delivery."})
       `;
     }
+    if (action === "PICKED_UP" || action === "DELIVERED") {
+      await enqueueTelegramAlert(tx, {
+        eventType: action === "PICKED_UP" ? "DRIVER_PICKED_UP" : "DRIVER_DROPPED",
+        entityType: "delivery_assignment",
+        entityId: assignment.id,
+        title: `Delivery ${assignment.order_number}`,
+        body: `${assignment.order_number} was ${action === "PICKED_UP" ? "picked up" : "delivered"}.`,
+      });
+    }
     if (action === "DELIVERED") {
+      await awardDeliveredOrderPoints(tx, assignment);
       await syncRiderEarnings(tx, riderId);
       await tx`UPDATE riders SET availability = 'ONLINE', updated_at = now() WHERE id = ${riderId}`;
     }

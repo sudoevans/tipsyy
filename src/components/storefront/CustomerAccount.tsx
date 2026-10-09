@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from "react";
 import StoreIcon from "./StoreIcon";
 import { formatPrice } from "./currency";
 
-type View = "overview" | "orders" | "addresses" | "favourites" | "notifications" | "settings" | "help";
+type View = "overview" | "orders" | "addresses" | "favourites" | "notifications" | "loyalty" | "settings" | "help";
 type ApiState = { loading: boolean; error: string; data: unknown };
 type ApiResponse<T = unknown> = { data?: T; error?: { message?: string } };
 
@@ -15,6 +15,7 @@ const links: Array<{ view: View; label: string; icon: Parameters<typeof StoreIco
   { view: "addresses", label: "Addresses", icon: "location" },
   { view: "favourites", label: "Favourites", icon: "heart" },
   { view: "notifications", label: "Notifications", icon: "bell" },
+  { view: "loyalty", label: "Loyalty points", icon: "user" },
   { view: "settings", label: "Settings", icon: "settings" },
   { view: "help", label: "Help & support", icon: "help" },
 ];
@@ -58,6 +59,7 @@ function AccountContent({ data, onRefresh, view }: { data: unknown; onRefresh: (
   if (view === "addresses") return <Addresses data={data as Array<Record<string, unknown>>} onRefresh={onRefresh} />;
   if (view === "favourites") return <Favourites data={data as Array<Record<string, unknown>>} onRefresh={onRefresh} />;
   if (view === "notifications") return <Notifications data={data as Array<Record<string, unknown>>} onRefresh={onRefresh} />;
+  if (view === "loyalty") return <Loyalty data={data as { pointsBalance: number; entries: Array<Record<string, unknown>> }} />;
   if (view === "settings") return <Settings data={data as Record<string, unknown>} onRefresh={onRefresh} />;
   if (view === "help") return <Help />;
   const profile = data as Record<string, unknown>;
@@ -89,6 +91,10 @@ function Favourites({ data, onRefresh }: { data: Array<Record<string, unknown>>;
 function Notifications({ data, onRefresh }: { data: Array<Record<string, unknown>>; onRefresh: () => void }) {
   async function read(id: string) { await fetch("/api/v1/account/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notificationId: id }) }); onRefresh(); }
   return <><h1 className="text-2xl font-semibold">Notifications</h1><div className="mt-5 grid gap-3">{data.length ? data.map((notification) => <button className={`rounded-xl p-4 text-left ${notification.status === "READ" ? "bg-tipsy-surface" : "bg-tipsy-amber-50"}`} key={String(notification.id)} onClick={() => void read(String(notification.id))} type="button"><strong className="text-sm">{String(notification.subject ?? notification.event_type)}</strong><p className="mt-1 text-sm text-tipsy-muted">{String(notification.body)}</p></button>) : <Empty>You have no notifications.</Empty>}</div></>;
+}
+
+function Loyalty({ data }: { data: { pointsBalance: number; entries: Array<Record<string, unknown>> } }) {
+  return <><h1 className="text-2xl font-semibold">Loyalty points</h1><div className="mt-5 rounded-2xl bg-tipsy-surface p-5"><p className="text-sm text-tipsy-muted">Available points</p><p className="mt-1 text-3xl font-bold">{Number(data.pointsBalance).toLocaleString("en-KE")}</p><p className="mt-2 text-xs text-tipsy-muted">Earn 1 point for every KSh100 spent on products after discounts. Points are added when an order is delivered.</p></div><h2 className="mt-7 text-base font-semibold">Points history</h2><div className="mt-3 grid gap-2">{data.entries.length ? data.entries.map((entry, index) => <div className="flex items-center justify-between gap-3 rounded-xl bg-tipsy-surface p-4" key={`${String(entry.order_number)}-${String(entry.created_at)}-${index}`}><span><strong className="block text-sm">{String(entry.note ?? (entry.entry_type === "EARN" ? "Points earned" : "Points adjustment"))}</strong><span className="mt-1 block text-xs text-tipsy-muted">{entry.order_number ? `Order ${String(entry.order_number)} · ` : ""}{new Date(String(entry.created_at)).toLocaleDateString("en-KE")}</span></span><strong className={Number(entry.points_delta) > 0 ? "text-tipsy-olive" : "text-red-700"}>{Number(entry.points_delta) > 0 ? "+" : ""}{Number(entry.points_delta).toLocaleString("en-KE")}</strong></div>) : <Empty>No points activity yet.</Empty>}</div></>;
 }
 
 function Settings({ data, onRefresh }: { data: Record<string, unknown>; onRefresh: () => void }) {

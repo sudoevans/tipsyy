@@ -16,12 +16,18 @@ import { type ReactNode, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   createRider,
+  createFleetVehicle,
   recordDriverPayout,
   setRiderStatus,
 } from "@/app/[locale]/(admin)/admin/actions";
 import { useAdminToast } from "@/components/admin/AdminToast";
 import AdminSelect from "@/components/admin/AdminSelect";
 import Badge from "@/components/ui/badge/Badge";
+import AdminPagination from "@/components/admin/AdminPagination";
+import ComponentCard from "@/components/common/ComponentCard";
+import Input from "@/components/form/input/InputField";
+import Button from "@/components/ui/button/Button";
+import BasicTableOne from "@/components/tables/BasicTableOne";
 
 type Driver = {
   id: string;
@@ -99,8 +105,22 @@ type Props = {
   payouts: DriverPayout[];
   payoutSummary: PayoutSummary;
   pendingPayments: PendingPayment[];
+  fleet: FleetVehicle[];
+  fleetPage: number;
+  fleetPageCount: number;
+  fleetTotal: number;
+  fleetPageSize: number;
 };
-type Tab = "overview" | "drivers" | "deliveries" | "payments";
+type FleetVehicle = {
+  registration: string;
+  vehicleType: string;
+  makeModel: string | null;
+  rider: string | null;
+  status: string;
+  insuranceExpiresAt: string | null;
+  serviceDueAt: string | null;
+};
+type Tab = "overview" | "drivers" | "deliveries" | "payments" | "fleet";
 
 const money = new Intl.NumberFormat("en-KE", {
   style: "currency",
@@ -175,6 +195,11 @@ export default function DriverOperations({
   payouts,
   payoutSummary,
   pendingPayments,
+  fleet,
+  fleetPage,
+  fleetPageCount,
+  fleetTotal,
+  fleetPageSize,
 }: Props) {
   const { showToast } = useAdminToast();
   const router = useRouter();
@@ -344,6 +369,7 @@ export default function DriverOperations({
             ["drivers", "Drivers"],
             ["deliveries", "Deliveries"],
             ["payments", "Payments"],
+            ["fleet", "Fleet"],
           ].map(([value, label]) => (
             <button
               type="button"
@@ -594,6 +620,36 @@ export default function DriverOperations({
           onPageChange={setPayoutsPage}
           onPayDriver={setSelectedPendingPayment}
         />
+      ) : null}
+      {tab === "fleet" ? (
+        <div className="space-y-5">
+          <ComponentCard title="Add fleet vehicle" desc="Track vehicles used by your drivers.">
+            <form action={createFleetVehicle} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <Input name="registration" placeholder="Registration" required />
+              <Input name="vehicleType" placeholder="Motorbike / van" required />
+              <Input name="makeModel" placeholder="Make and model" />
+              <label className="text-xs text-gray-500">Insurance expires<Input className="mt-1" name="insuranceExpires" type="date" /></label>
+              <label className="text-xs text-gray-500">Service due<Input className="mt-1" name="serviceDue" type="date" /></label>
+              <Button type="submit">Add vehicle</Button>
+            </form>
+          </ComponentCard>
+          <BasicTableOne
+            title="Fleet management"
+            description="Vehicles, assigned drivers, and compliance dates."
+            columns={["Registration", "Vehicle", "Driver", "Status", "Insurance", "Service due"]}
+            empty="No fleet vehicles recorded."
+            pagination={false}
+            footer={<AdminPagination page={fleetPage} pageCount={fleetPageCount} total={fleetTotal} pageSize={fleetPageSize} pageParam="fleetPage" />}
+            rows={fleet.map((vehicle) => [
+              <span key="registration" className="font-medium text-gray-800">{vehicle.registration}</span>,
+              [vehicle.vehicleType, vehicle.makeModel].filter(Boolean).join(" · "),
+              vehicle.rider ?? "Unassigned",
+              <Badge key="status" size="sm" color={vehicle.status === "AVAILABLE" ? "success" : vehicle.status === "MAINTENANCE" ? "warning" : "light"}>{vehicle.status}</Badge>,
+              vehicle.insuranceExpiresAt ? dateOnly.format(new Date(vehicle.insuranceExpiresAt)) : "—",
+              vehicle.serviceDueAt ? dateOnly.format(new Date(vehicle.serviceDueAt)) : "—",
+            ])}
+          />
+        </div>
       ) : null}
       {onboarding ? (
         <OnboardDriverDialog onClose={() => setOnboarding(false)} />

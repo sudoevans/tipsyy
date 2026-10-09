@@ -11,6 +11,7 @@ type Props = {
   pageCount: number;
   total: number;
   pageSize: number;
+  pageParam?: string;
 };
 
 export default function AdminPagination({
@@ -18,6 +19,7 @@ export default function AdminPagination({
   pageCount,
   total,
   pageSize,
+  pageParam = "page",
 }: Props) {
   const pathname = usePathname();
   const router = useRouter();
@@ -27,7 +29,7 @@ export default function AdminPagination({
   const goTo = (nextPage: number) => {
     if (nextPage < 1 || nextPage > pageCount || nextPage === page) return;
     const next = new URLSearchParams(params.toString());
-    next.set("page", String(nextPage));
+    next.set(pageParam, String(nextPage));
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   };
   const pages = Array.from({ length: Math.min(pageCount, 5) }, (_, index) => {
