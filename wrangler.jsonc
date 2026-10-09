@@ -22,7 +22,13 @@
     }
   ],
   "vars": {
-    "NEXTJS_ENV": "production"
+    "NEXTJS_ENV": "production",
+    "APP_URL": "https://tipsyy.snaveqiptoo.workers.dev",
+    "MPESA_ENVIRONMENT": "sandbox",
+    "MPESA_CALLBACK_URL": "https://tipsyy.snaveqiptoo.workers.dev/api/v1/payments/mpesa/callback",
+    "MPESA_TRANSACTION_TYPE": "CustomerPayBillOnline",
+    "MPESA_ACCOUNT_REFERENCE": "TipsyTheory",
+    "OTP_SENDER_ID": "TipsyTheory"
   },
   "triggers": {
     "crons": ["* * * * *"]
