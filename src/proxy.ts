@@ -2,6 +2,7 @@ import createMiddleware from "next-intl/middleware";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { routing } from "./i18n/routing";
+import { ADMIN_SESSION_COOKIE } from "./server/admin-session-cookie";
 
 const handleIntlRouting = createMiddleware(routing);
 const ADMIN_HOSTNAME = "admin.tipsytheoryy.com";
@@ -24,6 +25,10 @@ export default function proxy(request: NextRequest) {
   if (ADMIN_API_PATH.test(pathname)) return NextResponse.next();
 
   if (hostname === ADMIN_HOSTNAME) {
+    if (pathname === "/login" && !request.cookies.has(ADMIN_SESSION_COOKIE)) {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+
     const legacyAdminPath = pathname.match(/^\/(?:en\/)?admin(?:\/(.*))?$/i);
     if (legacyAdminPath) {
       const canonicalUrl = request.nextUrl.clone();
@@ -33,10 +38,14 @@ export default function proxy(request: NextRequest) {
       return NextResponse.redirect(canonicalUrl);
     }
 
-    // Keep the admin app's existing route tree while exposing clean URLs on
-    // the admin hostname: / -> /admin and /login -> /admin/login internally.
+    // Keep the existing route tree while exposing clean URLs: signed-out
+    // visits to / see the login form, while an existing session sees overview.
     const adminUrl = request.nextUrl.clone();
-    adminUrl.pathname = `/en/admin${pathname === "/" ? "" : pathname}`;
+    const internalAdminPath =
+      pathname === "/" && !request.cookies.has(ADMIN_SESSION_COOKIE)
+        ? "/admin/login"
+        : `/admin${pathname === "/" ? "" : pathname}`;
+    adminUrl.pathname = `/en${internalAdminPath}`;
     return NextResponse.rewrite(adminUrl);
   }
 
