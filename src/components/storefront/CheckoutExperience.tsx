@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import BeverageImage from "./BeverageImage";
 import PostPurchaseAccount from "./PostPurchaseAccount";
@@ -271,6 +271,7 @@ export default function CheckoutExperience() {
   const [mobileCheckoutView, setMobileCheckoutView] =
     useState<MobileCheckoutView>("summary");
   const [isAdvancingToPayment, setIsAdvancingToPayment] = useState(false);
+  const mobileDetailsFormRef = useRef<HTMLFormElement>(null);
   const [isSendingPayment, setIsSendingPayment] = useState(false);
   const [isCancellingPayment, setIsCancellingPayment] = useState(false);
   const [toast, setToast] = useState<CheckoutToast | null>(null);
@@ -999,6 +1000,7 @@ export default function CheckoutExperience() {
 
           {step === "details" && mobileCheckoutView === "details" ? (
             <form
+              ref={mobileDetailsFormRef}
               className={`${surfaceClass} checkout-step-enter mt-9 p-5`}
               onSubmit={(event) => {
                 event.preventDefault();
@@ -1277,20 +1279,26 @@ export default function CheckoutExperience() {
         <div className="fixed inset-x-0 bottom-0 z-[100] border-t border-[#e2ded6] bg-white/95 px-4 py-3 backdrop-blur-sm sm:hidden">
           <div className="mx-auto max-w-md">
             <button
-              className="flex h-12 w-full items-center justify-center rounded-xl bg-tipsy-amber-500 px-3 text-[14px] font-semibold text-tipsy-ink"
+              aria-busy={isAdvancingToPayment}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-tipsy-amber-500 px-3 text-[14px] font-semibold text-tipsy-ink transition hover:bg-tipsy-amber-300 disabled:cursor-wait disabled:opacity-75"
+              disabled={isAdvancingToPayment}
               onClick={() => {
                 if (mobileCheckoutView === "summary")
                   setMobileCheckoutView("details");
-                else
-                  document
-                    .querySelector<HTMLFormElement>("form")
-                    ?.requestSubmit();
+                else mobileDetailsFormRef.current?.requestSubmit();
               }}
               type="button"
             >
-              {mobileCheckoutView === "summary"
-                ? "Continue to delivery"
-                : "Continue to payment"}
+              {isAdvancingToPayment ? (
+                <>
+                  <span className="size-4 animate-spin rounded-full border-2 border-tipsy-ink/25 border-t-tipsy-ink" />
+                  Preparing payment…
+                </>
+              ) : mobileCheckoutView === "summary" ? (
+                "Continue to delivery"
+              ) : (
+                "Continue to payment"
+              )}
             </button>
           </div>
         </div>
