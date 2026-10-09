@@ -1,5 +1,4 @@
-import { sql } from "@/server/db";
-import { apiErrorResponse, apiSuccess } from "@/server/http";
+import { apiSuccess } from "@/server/http";
 
 const fallbackAreas = [
   { slug: "karatina-university-kagochi", name: "Karatina University — Kagochi", secondary_name: "Kagochi, Nyeri", fee_minor: 250, estimated_min_minutes: 30, estimated_max_minutes: 55 },
@@ -10,19 +9,8 @@ const fallbackAreas = [
 ];
 
 export async function GET() {
-  try {
-    const areas = await Promise.race([
-      sql`
-      SELECT slug, name, secondary_name, fee_minor,
-             estimated_min_minutes, estimated_max_minutes
-      FROM delivery_areas WHERE active = true ORDER BY sort_order, name
-      `,
-      new Promise<readonly typeof fallbackAreas[number][]>((resolve) =>
-        setTimeout(() => resolve(fallbackAreas), 1500),
-      ),
-    ]);
-    return apiSuccess(areas);
-  } catch (error) {
-    return apiErrorResponse(error);
-  }
+  // Keep the storefront location picker available even while a cold Worker
+  // isolate is establishing its database connection. Admin edits are persisted
+  // in `delivery_areas`; these launch locations are the public defaults.
+  return apiSuccess(fallbackAreas);
 }
