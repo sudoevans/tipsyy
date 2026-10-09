@@ -523,7 +523,6 @@ export async function createCheckoutOrder(
 }
 
 export async function getCatalog() {
-  await expireReservations();
   return sql`
     SELECT p.slug, p.name, p.description, p.image_url, p.alcohol_by_volume, p.featured,
            c.slug AS category_slug, c.name AS category_name, b.name AS brand_name,

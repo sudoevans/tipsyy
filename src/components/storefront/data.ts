@@ -1,4 +1,4 @@
-export type CategoryId = "whisky" | "beer" | "wine" | "vodka" | "mixers" | "gin" | "rum" | "spirits";
+export type CategoryId = "whisky" | "beer" | "wine" | "vodka" | "mixers" | "gin" | "rum" | "spirits" | "smokes";
 export type ProductId =
   | "glenmorangie" | "jack-daniels" | "red-label" | "chalawan" | "woodford" | "glenlivet"
   | "kc-pineapple" | "kc-ginger" | "kc-smooth" | "vat-69" | "kane-extra" | "captain-morgan-gold"
@@ -34,6 +34,7 @@ export const categories: StoreCategory[] = [
   { id: "vodka", imageUrl: "https://images.unsplash.com/photo-1547595628-c61a29f496f0?auto=format&fit=crop&w=600&q=85" },
   { id: "mixers", imageUrl: "https://images.unsplash.com/photo-1551024709-8f23befc6f87?auto=format&fit=crop&w=600&q=85" },
   { id: "gin", imageUrl: "https://images.unsplash.com/photo-1574096079513-d8259312b785?auto=format&fit=crop&w=600&q=85" },
+  { id: "smokes", imageUrl: "https://images.unsplash.com/photo-1527281400683-1aae777175f8?auto=format&fit=crop&w=600&q=85" },
 ];
 
 const pending = { available: false, price: 0, rating: "New", size: "Details coming soon" } as const;

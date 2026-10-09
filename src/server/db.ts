@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 import { getServerEnv } from "./env";
 
@@ -6,7 +7,24 @@ const globalDatabase = globalThis as typeof globalThis & {
   tipsySql?: postgres.Sql;
 };
 
-export const sql = globalDatabase.tipsySql ?? postgres(getServerEnv().DATABASE_URL, {
+type HyperdriveEnvironment = {
+  HYPERDRIVE?: {
+    connectionString: string;
+  };
+};
+
+function getDatabaseUrl() {
+  try {
+    const context = getCloudflareContext();
+    const hyperdrive = (context.env as typeof context.env & HyperdriveEnvironment).HYPERDRIVE;
+    if (hyperdrive?.connectionString) return hyperdrive.connectionString;
+  } catch {
+    // Local Next.js development and build-time execution do not have Worker bindings.
+  }
+  return getServerEnv().DATABASE_URL;
+}
+
+export const sql = globalDatabase.tipsySql ?? postgres(getDatabaseUrl(), {
   max: process.env.NODE_ENV === "production" ? 12 : 5,
   idle_timeout: 20,
   connect_timeout: 10,

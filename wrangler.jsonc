@@ -15,6 +15,12 @@
       "remote": true
     }
   ],
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "99a35620a4cb409b8db44dd132e9456f"
+    }
+  ],
   "vars": {
     "NEXTJS_ENV": "production"
   },
