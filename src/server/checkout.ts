@@ -344,8 +344,6 @@ export async function createCheckoutOrder(
     );
 
   return withTransaction(async (tx) => {
-    await releaseExpiredReservations(tx);
-
     const [deliveryArea] = await tx<DeliveryAreaRow[]>`
       SELECT id, slug, name, secondary_name, fee_minor, estimated_min_minutes, estimated_max_minutes
       FROM delivery_areas
@@ -546,7 +544,6 @@ export async function quoteCart(input: z.infer<typeof cartQuoteSchema>) {
       (quantities.get(item.productSlug) ?? 0) + item.quantity,
     );
   return withTransaction(async (tx) => {
-    await releaseExpiredReservations(tx);
     const slugs = [...quantities.keys()];
     const rows = await tx<ProductRow[]>`
       SELECT pv.id AS variant_id, p.id AS product_id, p.slug AS product_slug, p.name AS product_name,
