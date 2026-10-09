@@ -23,7 +23,7 @@ export default function SignInForm() {
     setMessage("Checking your credentials…");
     try {
       const response = await fetch("/api/v1/admin/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
-      const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      const payload = await response.json().catch(() => null) as { error?: { message?: string; requestId?: string } } | null;
       if (!response.ok) {
         const fallback = response.status === 401
           ? "That username or password is incorrect. Check both and try again."
@@ -32,7 +32,10 @@ export default function SignInForm() {
             : response.status >= 500
               ? "The admin service could not sign you in. Please try again."
               : "We could not sign you in with those details.";
-        throw new Error(payload?.error?.message ?? fallback);
+        const requestReference = payload?.error?.requestId
+          ? ` Support reference: ${payload.error.requestId}.`
+          : "";
+        throw new Error(`${payload?.error?.message ?? fallback}${requestReference}`);
       }
       setMessage("Signed in successfully. Opening the dashboard…");
       router.replace("/admin");

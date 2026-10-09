@@ -15,6 +15,6 @@ export async function POST(request: Request) {
     setAdminSessionCookie(response, result.token, result.expiresAt);
     return response;
   } catch (error) {
-    return apiErrorResponse(error);
+    return apiErrorResponse(error, crypto.randomUUID(), "/api/v1/admin/auth/login");
   }
 }
