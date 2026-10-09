@@ -23,7 +23,7 @@
   ],
   "vars": {
     "NEXTJS_ENV": "production",
-    "APP_URL": "https://tipsy.rehuman.work",
+    "APP_URL": "https://tipsytheoryy.com",
     "MPESA_ENVIRONMENT": "production",
     "MPESA_CALLBACK_URL": "https://tipsyy.snaveqiptoo.workers.dev/api/v1/payments/mpesa/callback",
     "MPESA_TRANSACTION_STATUS_RESULT_URL": "https://tipsyy.snaveqiptoo.workers.dev/api/v1/payments/mpesa/transaction-status/result",
