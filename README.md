@@ -1,6 +1,6 @@
-# Tipsy Theory
+# Tipsy Theoryy
 
-Tipsy Theory is a mobile-first alcohol delivery storefront with a PostgreSQL-backed catalog, persistent carts, stock reservations, guest checkout, Safaricom M-Pesa STK Push payments, passwordless phone authentication, customer accounts, order tracking, and admin/rider API foundations.
+Tipsy Theoryy is a mobile-first alcohol delivery storefront with a PostgreSQL-backed catalog, persistent carts, stock reservations, guest checkout, Safaricom M-Pesa STK Push payments, passwordless phone authentication, customer accounts, order tracking, and admin/rider API foundations.
 
 See [the backend setup and operations guide](docs/backend.md) before starting local services or configuring external providers.
 
@@ -16,7 +16,7 @@ The application intentionally fails closed for M-Pesa, OTP, Google OAuth, and in
 
 ## TipsyAdmin
 
-TipsyAdmin is the operational dashboard for Tipsy Theory. It uses Next.js 16, React 19, TypeScript, Tailwind CSS, and PostgreSQL-backed API routes.
+TipsyAdmin is the operational dashboard for Tipsy Theoryy. It uses Next.js 16, React 19, TypeScript, Tailwind CSS, and PostgreSQL-backed API routes.
 
 ## Overview
 
@@ -61,7 +61,7 @@ To get started with TipsyAdmin, ensure you have the following prerequisites inst
 Clone the repository using the following command:
 
 ```bash
-git clone <your-tipsy-theory-repository-url>
+git clone <your-tipsy-theoryy-repository-url>
 ```
 
 > Windows Users: place the repository near the root of your drive if you face issues while cloning.
@@ -86,7 +86,7 @@ git clone <your-tipsy-theory-repository-url>
 
 ## Components
 
-TipsyAdmin is the operational dashboard for the Tipsy Theory platform. It includes:
+TipsyAdmin is the operational dashboard for the Tipsy Theoryy platform. It includes:
 
 - Sophisticated and accessible sidebar
 - Data visualization components

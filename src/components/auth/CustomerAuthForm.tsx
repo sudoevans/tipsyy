@@ -49,7 +49,7 @@ export default function CustomerAuthForm({ mode }: { mode: "signin" | "signup" }
       {stage === "code" ? <button className="mt-4 text-sm font-semibold underline decoration-[#ffc400] decoration-2 underline-offset-4" onClick={() => { setStage("phone"); setCode(""); setError(""); }} type="button">Change phone number</button> : <>
         <div className="my-5 flex items-center gap-3 text-xs text-[#77736d]"><span className="h-px flex-1 bg-[#e9e5dd]" />or<span className="h-px flex-1 bg-[#e9e5dd]" /></div>
         <button className="flex h-12 w-full items-center justify-center rounded-xl bg-[#f5f3ee] text-[14px] font-semibold" onClick={() => window.location.assign(new URL("/api/v1/auth/google/start", window.location.origin).toString())} type="button">Continue with Google</button>
-        <p className="mt-5 text-center text-[13px] text-[#77736d]">{mode === "signup" ? "Already have an account?" : "New to Tipsy Theory?"} <Link className="font-semibold text-[#15130f] underline decoration-[#ffc400] decoration-2 underline-offset-4" href={mode === "signup" ? "/signin" : "/signup"}>{mode === "signup" ? "Sign in" : "Create account"}</Link></p>
+        <p className="mt-5 text-center text-[13px] text-[#77736d]">{mode === "signup" ? "Already have an account?" : "New to Tipsy Theoryy?"} <Link className="font-semibold text-[#15130f] underline decoration-[#ffc400] decoration-2 underline-offset-4" href={mode === "signup" ? "/signin" : "/signup"}>{mode === "signup" ? "Sign in" : "Create account"}</Link></p>
       </>}
     </section>
   </main>;

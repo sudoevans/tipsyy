@@ -1,4 +1,4 @@
-# Tipsy Theory platform backend
+# Tipsy Theoryy platform backend
 
 ## Local setup
 

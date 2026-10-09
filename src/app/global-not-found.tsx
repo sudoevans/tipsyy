@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Page not found | Tipsy Theory",
+  title: "Page not found | Tipsy Theoryy",
   description: "The requested page could not be found.",
 };
 

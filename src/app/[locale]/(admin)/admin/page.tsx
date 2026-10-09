@@ -7,7 +7,7 @@ import { ArrowUpRightIcon, CoinsStacked03Icon, LineChartUp01Icon, ReceiptIcon, U
 import type { Metadata } from "next";
 import Link from "next/link";
 
-export const metadata: Metadata = { title: "Operations overview | Tipsy Theory", description: "Tipsy Theory store operations" };
+export const metadata: Metadata = { title: "Operations overview | Tipsy Theoryy", description: "Tipsy Theoryy store operations" };
 export const dynamic = "force-dynamic";
 
 const money = new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 0 });
@@ -47,7 +47,7 @@ export default async function AdminOverviewPage() {
   ];
   return (
     <div className="grid grid-cols-12 gap-4 md:gap-6">
-      <div className="col-span-12"><p className="text-sm font-medium text-gray-500 dark:text-gray-400">Tipsy Theory operations</p><h1 className="mt-1 text-2xl font-semibold text-gray-800 dark:text-white/90">Dashboard</h1></div>
+      <div className="col-span-12"><p className="text-sm font-medium text-gray-500 dark:text-gray-400">Tipsy Theoryy operations</p><h1 className="mt-1 text-2xl font-semibold text-gray-800 dark:text-white/90">Dashboard</h1></div>
       <div className="col-span-12">
       <EcommerceMetrics metrics={{ revenue: money.format(summary.revenue_minor), orders: summary.order_count.toLocaleString(), customers: summary.customer_count.toLocaleString(), activeRiders: summary.rider_count.toLocaleString() }} />
       </div>

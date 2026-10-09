@@ -35,7 +35,7 @@ async function sendOtp(phone: string, code: string) {
     body: JSON.stringify({
       to: phone,
       senderId: env.OTP_SENDER_ID,
-      message: `${code} is your Tipsy Theory verification code. It expires in 5 minutes.`,
+      message: `${code} is your Tipsy Theoryy verification code. It expires in 5 minutes.`,
     }),
     cache: "no-store",
     signal: AbortSignal.timeout(12_000),

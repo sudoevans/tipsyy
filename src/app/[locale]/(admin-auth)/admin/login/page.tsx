@@ -5,7 +5,7 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { title: "Admin sign in | Tipsy Theory", description: "Restricted Tipsy Theory operations access." };
+export const metadata: Metadata = { title: "Admin sign in | Tipsy Theoryy", description: "Restricted Tipsy Theoryy operations access." };
 
 export default async function AdminLoginPage() {
   const cookieStore = await cookies();

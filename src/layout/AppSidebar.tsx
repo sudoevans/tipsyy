@@ -130,7 +130,7 @@ export default function AppSidebar() {
           expanded ? "justify-start" : "xl:justify-center",
         )}
       >
-        <Link href="/admin" aria-label="Tipsy Theory operations">
+        <Link href="/admin" aria-label="Tipsy Theoryy operations">
           {expanded ? (
             <span className="flex items-center gap-2.5">
               <Image
@@ -147,7 +147,7 @@ export default function AppSidebar() {
           ) : (
             <Image
               src="/images/logo/logo-icon.svg"
-              alt="Tipsy Theory admin"
+              alt="Tipsy Theoryy admin"
               width={32}
               height={32}
               priority
