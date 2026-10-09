@@ -25,6 +25,10 @@ Migrations are append-only SQL files under `db/migrations`. Seed data is idempot
 - Customer order tracking is generated from persisted `order_events`.
 - Admin and rider transitions are authorized and validated against allowed state transitions.
 
+## V2 roadmap
+
+- Replace straight-line delivery distance estimates with OSRM driving-route distances using OpenStreetMap road data. Use a self-hosted or managed OSRM instance for production; do not depend on the public demo server. Keep the per-kilometre rate configurable by admins.
+
 ## Main API groups
 
 - `/api/v1/catalog`, `/api/v1/content`, `/api/v1/delivery-areas`
@@ -34,4 +38,3 @@ Migrations are append-only SQL files under `db/migrations`. Seed data is idempot
 - `/api/v1/internal/maintenance`
 
 All API errors use `{ error: { code, message, details?, requestId } }` and sensitive endpoints are rate-limited or role protected.
-
