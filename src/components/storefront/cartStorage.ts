@@ -28,7 +28,11 @@ async function writeCartItems(cart: CartSnapshot) {
     body: JSON.stringify({ items: cartItems(cart) }),
   });
   const payload = await response.json().catch(() => ({})) as { data?: { items?: Array<{ productSlug: string; quantity: number }> }; error?: { message?: string } };
-  if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? "We could not update your cart. Please try again.");
+  if (!response.ok || !payload.data) {
+    const error = new Error(payload.error?.message ?? "We could not update your cart. Please try again.");
+    Object.assign(error, { status: response.status });
+    throw error;
+  }
   const confirmed = Object.fromEntries((payload.data.items ?? []).map((item) => [item.productSlug, item.quantity]));
   window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(confirmed));
   return confirmed;
@@ -39,7 +43,11 @@ export function confirmCartForCheckout(cart: CartSnapshot) {
   const request = cartWriteQueue
     .catch(() => undefined)
     .then(() => writeCartItems(cart))
-    .catch(() => {
+    .catch((error: unknown) => {
+      const status = typeof error === "object" && error !== null && "status" in error
+        ? Number(error.status)
+        : null;
+      if (status !== null && status < 500) throw error;
       // Keep the cart usable if the background server sync is temporarily
       // unavailable. Checkout always validates stock and pricing again.
       return cart;

@@ -368,7 +368,7 @@ export async function createCheckoutOrder(
       FROM products p
       JOIN product_variants pv ON pv.product_id = p.id AND pv.is_default = true AND pv.active = true
       JOIN inventory i ON i.variant_id = pv.id
-      WHERE p.active = true AND p.slug = ANY(${tx.array(slugs)})
+      WHERE p.active = true AND p.slug IN (SELECT jsonb_array_elements_text(${JSON.stringify(slugs)}::text::jsonb))
       FOR UPDATE OF i
     `;
     if (rows.length !== slugs.length) {
@@ -554,7 +554,7 @@ export async function quoteCart(input: z.infer<typeof cartQuoteSchema>) {
              i.on_hand_quantity, i.reserved_quantity
       FROM products p JOIN product_variants pv ON pv.product_id = p.id AND pv.is_default = true AND pv.active = true
       JOIN inventory i ON i.variant_id = pv.id
-      WHERE p.active = true AND p.slug = ANY(${tx.array(slugs)})
+      WHERE p.active = true AND p.slug IN (SELECT jsonb_array_elements_text(${JSON.stringify(slugs)}::text::jsonb))
     `;
     if (rows.length !== slugs.length)
       throw new ApiError(

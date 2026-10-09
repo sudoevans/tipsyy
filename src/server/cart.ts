@@ -115,7 +115,7 @@ export async function replaceCart(identity: CartIdentity, input: z.infer<typeof 
              (p.active AND pv.active) AS active
       FROM products p JOIN product_variants pv ON pv.product_id = p.id AND pv.is_default = true
       JOIN inventory i ON i.variant_id = pv.id
-      WHERE p.slug = ANY(${tx.array(slugs)})
+      WHERE p.slug IN (SELECT jsonb_array_elements_text(${JSON.stringify(slugs)}::text::jsonb))
       FOR UPDATE OF i
     `;
     const bySlug = new Map(variants.map((row) => [row.slug, row]));
