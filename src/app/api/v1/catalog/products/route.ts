@@ -23,6 +23,7 @@ const catalogSeed = [
   ["smirnoff-ice-beer", "Smirnoff Ice", "beer", 300, 6],
   ["captain-muck-pit", "Captain Muck Pit", "whisky", 1299, 3, "captain-morgan-muck-pit.jpg"],
   ["jw-black-label", "JW Black Label", "whisky", 4999, 0],
+  ["test", "Test", "whisky", 1, 1],
   ["test-product", "Test Product", "whisky", 5, 1],
   ["smirnoff-ice-spirits", "Smirnoff Ice", "spirits", 300, 0],
   ["chrome-spirits", "Chrome", "spirits", 779, 0],

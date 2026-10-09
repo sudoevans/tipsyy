@@ -15,6 +15,15 @@ const deliveryAreas = [
   { slug: "kinoo-ward", name: "Kinoo ward", secondary_name: "Kikuyu, Kiambu", fee_minor: 250, estimated_min_minutes: 30, estimated_max_minutes: 55, latitude: -1.25591, longitude: 36.70018, service_radius_km: 8 },
 ];
 
+const testArea = {
+  slug: "test",
+  name: "Test",
+  secondary_name: "Test delivery area",
+  fee_minor: 1,
+  estimated_min_minutes: null,
+  estimated_max_minutes: null,
+};
+
 function distanceKm(latitude: number, longitude: number, area: typeof deliveryAreas[number]) {
   const radians = Math.PI / 180;
   const latitudeDifference = (area.latitude - latitude) * radians;
@@ -30,11 +39,13 @@ export async function POST(request: Request) {
     const area = "name" in input
       ? deliveryAreas.find((candidate) => candidate.name.toLowerCase() === input.name.toLowerCase()
         || candidate.name.toLowerCase().includes(input.name.toLowerCase()))
+        ?? (input.name.toLowerCase() === testArea.name.toLowerCase() ? testArea : undefined)
       : deliveryAreas
         .map((candidate) => ({ candidate, distance: distanceKm(input.latitude, input.longitude, candidate) }))
         .sort((left, right) => left.distance - right.distance)[0]?.candidate;
     const serviceable = area
-      ? (!("latitude" in input) || distanceKm(input.latitude, input.longitude, area) <= area.service_radius_km)
+      ? (!("latitude" in input)
+        || ("latitude" in area && distanceKm(input.latitude, input.longitude, area) <= area.service_radius_km))
       : false;
     return apiSuccess({ serviceable, area: serviceable ? area : null });
   } catch (error) {
