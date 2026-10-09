@@ -37,7 +37,7 @@ function getDatabaseClient() {
     idle_timeout: 10,
     connect_timeout: 5,
     fetch_types: false,
-    prepare: false,
+    prepare: true,
   });
   if (process.env.NODE_ENV !== "production") globalDatabase.tipsySql = databaseClient;
   return databaseClient;
