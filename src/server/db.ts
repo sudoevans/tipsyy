@@ -25,10 +25,11 @@ function getDatabaseUrl() {
 }
 
 export const sql = globalDatabase.tipsySql ?? postgres(getDatabaseUrl(), {
-  max: process.env.NODE_ENV === "production" ? 12 : 5,
-  idle_timeout: 20,
-  connect_timeout: 10,
-  prepare: true,
+  max: process.env.NODE_ENV === "production" ? 5 : 5,
+  idle_timeout: 10,
+  connect_timeout: 5,
+  fetch_types: false,
+  prepare: false,
 });
 
 if (process.env.NODE_ENV !== "production") globalDatabase.tipsySql = sql;
