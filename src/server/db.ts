@@ -24,16 +24,41 @@ function getDatabaseUrl() {
   return getServerEnv().DATABASE_URL;
 }
 
-export const sql = globalDatabase.tipsySql ?? postgres(getDatabaseUrl(), {
-  max: process.env.NODE_ENV === "production" ? 5 : 5,
-  idle_timeout: 10,
-  connect_timeout: 5,
-  fetch_types: false,
-  prepare: false,
-});
+let databaseClient: postgres.Sql | undefined;
 
-if (process.env.NODE_ENV !== "production") globalDatabase.tipsySql = sql;
+function getDatabaseClient() {
+  if (databaseClient) return databaseClient;
+  databaseClient = globalDatabase.tipsySql ?? postgres(getDatabaseUrl(), {
+    max: 5,
+    idle_timeout: 10,
+    connect_timeout: 5,
+    fetch_types: false,
+    prepare: false,
+  });
+  if (process.env.NODE_ENV !== "production") globalDatabase.tipsySql = databaseClient;
+  return databaseClient;
+}
 
+const sqlProxy = function sqlProxy(this: unknown, ...args: unknown[]) {
+  return Reflect.apply(getDatabaseClient() as unknown as (...input: unknown[]) => unknown, this, args);
+};
+
+export const sql = new Proxy(sqlProxy, {
+  apply(_target, thisArg, args) {
+    return Reflect.apply(getDatabaseClient() as unknown as (...input: unknown[]) => unknown, thisArg, args);
+  },
+  get(_target, property) {
+    const value = Reflect.get(getDatabaseClient(), property);
+    return typeof value === "function" ? value.bind(getDatabaseClient()) : value;
+  },
+}) as unknown as postgres.Sql;
+
+/*
+ * The proxy is intentional: Worker bindings are request-scoped and are not
+ * available while the bundled module is being evaluated on a fresh isolate.
+ * Creating postgres at module scope would make that isolate permanently fall
+ * back to the local DATABASE_URL.
+ */
 export type Database = postgres.Sql;
 export type Transaction = postgres.TransactionSql;
 
