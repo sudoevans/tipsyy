@@ -7,6 +7,7 @@ import { getServerEnv } from "./env";
 const globalDatabase = globalThis as typeof globalThis & {
   tipsySql?: postgres.Sql;
   tipsyDatabaseStorage?: AsyncLocalStorage<postgres.Sql>;
+  tipsyHyperdriveConnectionString?: string;
 };
 
 const requestDatabaseStorage = globalDatabase.tipsyDatabaseStorage ??= new AsyncLocalStorage<postgres.Sql>();
@@ -50,13 +51,24 @@ function getDatabaseClient() {
 }
 
 export async function withRequestDatabaseClient<T>(connectionString: string, work: () => Promise<T>) {
-  const client = postgres(connectionString, {
-    max: 5,
-    idle_timeout: 10,
-    connect_timeout: 5,
-    fetch_types: false,
-    prepare: true,
-  });
+  // Reuse one bounded Hyperdrive pool per Worker isolate. Creating a new
+  // postgres.js pool for every request leaves sockets alive across requests
+  // and can exhaust Worker connection/resource limits under traffic or cron.
+  if (
+    !globalDatabase.tipsySql ||
+    globalDatabase.tipsyHyperdriveConnectionString !== connectionString
+  ) {
+    globalDatabase.tipsySql = postgres(connectionString, {
+      max: 5,
+      idle_timeout: 10,
+      connect_timeout: 5,
+      fetch_types: false,
+      prepare: true,
+    });
+    globalDatabase.tipsyHyperdriveConnectionString = connectionString;
+  }
+  const client = globalDatabase.tipsySql;
+  databaseClient = client;
   return requestDatabaseStorage.run(client, work);
 }
 
