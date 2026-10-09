@@ -17,7 +17,7 @@ export default function GlobalNotFound() {
           <p className="mt-3 text-sm leading-6 text-tipsy-muted">The page may have moved, or the address may be incomplete.</p>
           <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
             <Link className="inline-flex h-11 items-center justify-center rounded-xl bg-tipsy-amber-500 px-5 text-sm font-semibold transition hover:bg-tipsy-amber-300" href="/">Go to store</Link>
-            <Link className="inline-flex h-11 items-center justify-center rounded-xl border border-tipsy-line px-5 text-sm font-semibold transition hover:bg-tipsy-surface" href="/admin">Open operations</Link>
+            <Link className="inline-flex h-11 items-center justify-center rounded-xl border border-tipsy-line px-5 text-sm font-semibold transition hover:bg-tipsy-surface" href="https://admin.tipsytheoryy.com/admin">Open operations</Link>
           </div>
         </section>
       </main>
