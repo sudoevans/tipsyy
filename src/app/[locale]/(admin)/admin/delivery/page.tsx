@@ -1,15 +1,16 @@
-import DeliveryZonesTable, {
-  type DeliveryZone,
-} from "@/components/admin/DeliveryZonesTable";
 import AdminPagination from "@/components/admin/AdminPagination";
-import AdminSelect from "@/components/admin/AdminSelect";
 import ComponentCard from "@/components/common/ComponentCard";
 import Input from "@/components/form/input/InputField";
 import BasicTableOne from "@/components/tables/BasicTableOne";
 import Badge from "@/components/ui/badge/Badge";
 import Button from "@/components/ui/button/Button";
 import { sql } from "@/server/db";
-import { createFleetVehicle, saveDeliveryArea } from "../actions";
+import {
+  createFleetVehicle,
+  saveDeliveryPricePerKm,
+  saveStoreLocation,
+  setStoreLocationActive,
+} from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -40,22 +41,21 @@ export default async function DeliveryPage({
     sql<
       {
         id: string;
-        slug: string;
         name: string;
-        secondary_name: string | null;
-        fee_mode: "STATIC" | "PER_KM";
-        fee_minor: number;
-        per_km_minor: number;
-        minimum_fee_minor: number;
+        address: string;
+        latitude: number;
+        longitude: number;
         active: boolean;
       }[]
     >`
-      SELECT id,slug,name,secondary_name,fee_mode,fee_minor,per_km_minor,minimum_fee_minor,active
-      FROM delivery_areas
-      ORDER BY sort_order,name
+      SELECT id,name,address,latitude::float8,longitude::float8,active FROM store_locations ORDER BY active DESC,name
     `,
     sql<{ count: number }[]>`SELECT COUNT(*)::int AS count FROM fleet_vehicles`,
   ]);
+  const [priceSetting] = await sql<{ amount_minor: number }[]>`
+    SELECT COALESCE((value->>'amount_minor')::integer,5000) AS amount_minor
+    FROM platform_settings WHERE key='delivery.price_per_km'
+  `;
   const fleetTotal = fleetCount?.count ?? 0;
   const fleetPageCount = Math.max(1, Math.ceil(fleetTotal / fleetPageSize));
   const fleetPage = Math.min(requestedPage, fleetPageCount);
@@ -76,51 +76,162 @@ export default async function DeliveryPage({
           Delivery zones
         </h1>
         <p className="mt-1 text-sm text-gray-500">
-          Manage delivery coverage, customer-facing fees, and fleet
+          Manage store locations, distance-based delivery pricing, and fleet
           availability.
         </p>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
         <ComponentCard
-          title="Add delivery zone"
-          desc="Zones appear as delivery location suggestions at checkout."
+          title="Store locations"
+          desc="Delivery is priced from the nearest active store using the customer's current location."
         >
-          <form action={saveDeliveryArea} className="grid gap-4 sm:grid-cols-2">
-            <Input name="name" placeholder="Zone name" required />
-            <Input name="slug" placeholder="zone-slug" required />
-            <Input name="secondaryName" placeholder="County / area" />
-            <AdminSelect
-              name="feeMode"
-              defaultValue="STATIC"
-              placeholder="Choose fee model"
-              options={[
-                { value: "STATIC", label: "Static fee" },
-                { value: "PER_KM", label: "Per kilometre" },
-              ]}
-            />
-            <Input
-              name="fee"
-              type="number"
-              min={0}
-              step={1}
-              placeholder="Static fee (KSh)"
-            />
-            <Input
-              name="perKm"
-              type="number"
-              min={0}
-              step={1}
-              placeholder="Per km (KSh)"
-            />
-            <Input
-              name="minimumFee"
-              type="number"
-              min={0}
-              step={1}
-              placeholder="Minimum fee (KSh)"
-            />
-            <Button type="submit">Save zone</Button>
+          <div className="space-y-3">
+            {areas.map((store) => (
+              <div
+                key={store.id}
+                className="rounded-xl border border-gray-200 p-4 dark:border-gray-800"
+              >
+                <form
+                  action={saveStoreLocation}
+                  className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-4"
+                >
+                  <input type="hidden" name="storeId" value={store.id} />
+                  <label className="text-xs text-gray-500">
+                    Store name
+                    <Input
+                      className="mt-1"
+                      name="name"
+                      defaultValue={store.name}
+                      required
+                    />
+                  </label>
+                  <label className="text-xs text-gray-500">
+                    Address / plus code
+                    <Input
+                      className="mt-1"
+                      name="address"
+                      defaultValue={store.address}
+                      required
+                    />
+                  </label>
+                  <label className="text-xs text-gray-500">
+                    Latitude
+                    <Input
+                      className="mt-1"
+                      name="latitude"
+                      type="number"
+                      step="any"
+                      defaultValue={store.latitude}
+                      required
+                    />
+                  </label>
+                  <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+                    <label className="text-xs text-gray-500">
+                      Longitude
+                      <Input
+                        className="mt-1"
+                        name="longitude"
+                        type="number"
+                        step="any"
+                        defaultValue={store.longitude}
+                        required
+                      />
+                    </label>
+                    <Button type="submit">Save</Button>
+                  </div>
+                </form>
+                <div className="mt-3 flex items-center justify-between border-t border-gray-100 pt-3 dark:border-gray-800">
+                  <Badge size="sm" color={store.active ? "success" : "light"}>
+                    {store.active ? "Active" : "Inactive"}
+                  </Badge>
+                  <form
+                    action={setStoreLocationActive.bind(
+                      null,
+                      store.id,
+                      !store.active,
+                    )}
+                  >
+                    <Button type="submit" variant="outline">
+                      {store.active ? "Deactivate" : "Activate"}
+                    </Button>
+                  </form>
+                </div>
+              </div>
+            ))}
+            <form
+              action={saveStoreLocation}
+              className="grid items-end gap-3 rounded-xl border border-dashed border-gray-300 p-4 sm:grid-cols-2 xl:grid-cols-4 dark:border-gray-700"
+            >
+              <label className="text-xs text-gray-500">
+                New store name
+                <Input
+                  className="mt-1"
+                  name="name"
+                  placeholder="Store name"
+                  required
+                />
+              </label>
+              <label className="text-xs text-gray-500">
+                Address / plus code
+                <Input
+                  className="mt-1"
+                  name="address"
+                  placeholder="Address or plus code"
+                  required
+                />
+              </label>
+              <label className="text-xs text-gray-500">
+                Latitude
+                <Input
+                  className="mt-1"
+                  name="latitude"
+                  type="number"
+                  step="any"
+                  placeholder="-0.3935871"
+                  required
+                />
+              </label>
+              <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+                <label className="text-xs text-gray-500">
+                  Longitude
+                  <Input
+                    className="mt-1"
+                    name="longitude"
+                    type="number"
+                    step="any"
+                    placeholder="37.1322716"
+                    required
+                  />
+                </label>
+                <Button type="submit">Add store</Button>
+              </div>
+            </form>
+          </div>
+        </ComponentCard>
+
+        <ComponentCard
+          title="Delivery pricing"
+          desc="One rate applies to every delivery, based on distance from the nearest active store."
+        >
+          <form action={saveDeliveryPricePerKm} className="grid gap-4">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Price per kilometre (KSh)
+              <Input
+                className="mt-2"
+                name="amount"
+                type="number"
+                min={0}
+                step="0.01"
+                defaultValue={(priceSetting?.amount_minor ?? 5000) / 100}
+                required
+              />
+            </label>
+            <p className="text-xs text-gray-500">
+              Straight-line distance is rounded up to the next kilometre. For
+              example, 2.1 km is charged as 3 km.
+            </p>
+            <Button type="submit">Save rate</Button>
           </form>
         </ComponentCard>
 
@@ -147,20 +258,6 @@ export default async function DeliveryPage({
           </form>
         </ComponentCard>
       </div>
-
-      <DeliveryZonesTable
-        zones={areas.map((area): DeliveryZone => ({
-          id: area.id,
-          slug: area.slug,
-          name: area.name,
-          secondaryName: area.secondary_name,
-          feeMode: area.fee_mode,
-          fee: area.fee_minor,
-          perKm: area.per_km_minor,
-          minimumFee: area.minimum_fee_minor,
-          active: area.active,
-        }))}
-      />
 
       <BasicTableOne
         title="Fleet management"

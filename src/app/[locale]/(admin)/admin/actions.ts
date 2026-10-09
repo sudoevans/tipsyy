@@ -654,10 +654,98 @@ export async function saveDeliveryArea(formData: FormData) {
   revalidatePath("/admin/delivery");
 }
 
-export async function setDeliveryAreaActive(
-  areaId: string,
-  active: boolean,
-) {
+export async function saveDeliveryPricePerKm(formData: FormData) {
+  const admin = await requireAdministrator();
+  const input = z
+    .object({ amount: z.coerce.number().finite().nonnegative().max(100000) })
+    .parse({ amount: formData.get("amount") });
+  const amountMinor = Math.round(input.amount * 100);
+  await sql`
+    INSERT INTO platform_settings (key,value,description,updated_by)
+    VALUES ('delivery.price_per_km',${JSON.stringify({ amount_minor: amountMinor })}::jsonb,'Delivery charge in KSh per started kilometre from the nearest active store.',${admin.id})
+    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,description=EXCLUDED.description,updated_by=EXCLUDED.updated_by,updated_at=now()
+  `;
+  await audit(
+    admin.id,
+    "delivery.price_per_km.updated",
+    "platform_setting",
+    "delivery.price_per_km",
+    { amountMinor },
+  );
+  revalidatePath("/admin/delivery");
+}
+
+export async function saveStoreLocation(formData: FormData) {
+  const admin = await requireAdministrator();
+  const storeId = text(formData, "storeId");
+  const input = z
+    .object({
+      name: z.string().trim().min(2).max(120),
+      address: z.string().trim().min(2).max(240),
+      latitude: z.coerce.number().finite().min(-90).max(90),
+      longitude: z.coerce.number().finite().min(-180).max(180),
+    })
+    .parse({
+      name: formData.get("name"),
+      address: formData.get("address"),
+      latitude: formData.get("latitude"),
+      longitude: formData.get("longitude"),
+    });
+
+  if (storeId) {
+    const id = idSchema.parse(storeId);
+    const [store] = await sql<{ id: string }[]>`
+      UPDATE store_locations SET name=${input.name},address=${input.address},latitude=${input.latitude},longitude=${input.longitude},updated_at=now()
+      WHERE id=${id} RETURNING id
+    `;
+    if (!store) throw new Error("This store location no longer exists.");
+    await audit(
+      admin.id,
+      "store_location.updated",
+      "store_location",
+      store.id,
+      input,
+    );
+  } else {
+    const [store] = await sql<{ id: string }[]>`
+      INSERT INTO store_locations (name,address,latitude,longitude) VALUES (${input.name},${input.address},${input.latitude},${input.longitude}) RETURNING id
+    `;
+    await audit(
+      admin.id,
+      "store_location.created",
+      "store_location",
+      store.id,
+      input,
+    );
+  }
+  revalidatePath("/admin/delivery");
+}
+
+export async function setStoreLocationActive(storeId: string, active: boolean) {
+  const admin = await requireAdministrator();
+  const id = idSchema.parse(storeId);
+  if (!active) {
+    const [{ count }] = await sql<
+      { count: number }[]
+    >`SELECT COUNT(*)::int AS count FROM store_locations WHERE active=true`;
+    if (count <= 1)
+      throw new Error("At least one store location must remain active.");
+  }
+  const [store] = await sql<{ id: string; name: string }[]>`
+    UPDATE store_locations SET active=${active},updated_at=now() WHERE id=${id} RETURNING id,name
+  `;
+  if (!store) throw new Error("This store location no longer exists.");
+  await audit(
+    admin.id,
+    active ? "store_location.activated" : "store_location.deactivated",
+    "store_location",
+    store.id,
+    { name: store.name },
+  );
+  revalidatePath("/admin/delivery");
+}
+
+export async function setDeliveryAreaActive(areaId: string, active: boolean) {
   const admin = await requireAdministrator();
   const id = idSchema.parse(areaId);
   const [area] = await sql<{ id: string; name: string }[]>`

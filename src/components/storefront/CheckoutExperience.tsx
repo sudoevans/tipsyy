@@ -11,11 +11,13 @@ import {
   clearCartForCheckout,
   readCheckoutDetails,
   readCouponCode,
+  readDeliveryDetails,
   readDeliveryLocation,
   restoreCartForCheckout,
   saveCheckoutDetails,
   saveDeliveryLocation,
 } from "./cartStorage";
+import { getCurrentDeliveryLocation } from "./deliveryLocation";
 import { formatPrice } from "./currency";
 import StoreIcon from "./StoreIcon";
 import useCatalogProducts from "./useCatalogProducts";
@@ -255,6 +257,12 @@ export default function CheckoutExperience() {
   const { isLoading: isCatalogLoading, products } = useCatalogProducts();
   const [cart, setCart] = useState<Record<string, number>>({});
   const [deliveryLocation, setDeliveryLocation] = useState("");
+  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [deliveryCoordinates, setDeliveryCoordinates] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [deliveryInstructions, setDeliveryInstructions] = useState("");
   const [isReady, setIsReady] = useState(false);
   const [step, setStep] = useState<CheckoutStep>("details");
   const [isIssueOpen, setIsIssueOpen] = useState(false);
@@ -264,7 +272,7 @@ export default function CheckoutExperience() {
   const [paymentReceipt, setPaymentReceipt] = useState<PaymentReceipt | null>(
     null,
   );
-  const [isEditingAddress, setIsEditingAddress] = useState(false);
+  const [isRequestingLocation, setIsRequestingLocation] = useState(false);
   const [summaryPage, setSummaryPage] = useState(0);
   const [isSummaryExpanded, setIsSummaryExpanded] = useState(false);
   const [isMobileSummaryOpen, setIsMobileSummaryOpen] = useState(false);
@@ -285,42 +293,9 @@ export default function CheckoutExperience() {
   const [customer, setCustomer] = useState({ name: "", phone: "" });
   const [deliveryQuote, setDeliveryQuote] = useState({
     fee: 0,
-    minMinutes: null as number | null,
-    maxMinutes: null as number | null,
+    distanceKm: null as number | null,
+    ratePerKm: 0,
   });
-
-  useEffect(() => {
-    if (!deliveryLocation) return;
-    let active = true;
-    void fetch("/api/v1/delivery-areas", { cache: "no-store" })
-      .then(
-        (response) =>
-          response.json() as Promise<{
-            data?: Array<Record<string, unknown>>;
-          }>,
-      )
-      .then((payload) => {
-        const areas = Array.isArray(payload.data)
-          ? (payload.data as Array<Record<string, unknown>>)
-          : [];
-        const selected = areas.find(
-          (area) =>
-            String(area.name).toLowerCase() ===
-              deliveryLocation.toLowerCase() ||
-            String(area.slug) === deliveryLocation,
-        );
-        if (active && selected)
-          setDeliveryQuote({
-            fee: Number(selected.fee_minor),
-            minMinutes: Number(selected.estimated_min_minutes) || null,
-            maxMinutes: Number(selected.estimated_max_minutes) || null,
-          });
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [deliveryLocation]);
 
   useEffect(() => {
     let active = true;
@@ -330,7 +305,20 @@ export default function CheckoutExperience() {
         if (!active) return;
         setCart(restored);
         setIsReady(true);
-        setDeliveryLocation(readDeliveryLocation());
+        const savedLocation = readDeliveryDetails();
+        setDeliveryLocation(savedLocation?.area ?? readDeliveryLocation());
+        setDeliveryAddress(savedLocation?.addressLine ?? "");
+        setDeliveryCoordinates(
+          savedLocation &&
+            Number.isFinite(savedLocation.latitude) &&
+            Number.isFinite(savedLocation.longitude)
+            ? {
+                latitude: savedLocation.latitude,
+                longitude: savedLocation.longitude,
+              }
+            : null,
+        );
+        setDeliveryInstructions(savedLocation?.instructions ?? "");
         const savedDetails = readCheckoutDetails();
         setCustomer({
           ...savedDetails,
@@ -412,6 +400,49 @@ export default function CheckoutExperience() {
         .map((product) => ({ product, quantity: cart[product.id] })),
     [cart, products],
   );
+
+  useEffect(() => {
+    if (!deliveryCoordinates || items.length === 0) {
+      return;
+    }
+    let active = true;
+    void fetch("/api/v1/cart/quote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: items.map(({ product, quantity }) => ({
+          productSlug: product.id,
+          quantity,
+        })),
+        delivery: deliveryCoordinates,
+        couponCode: readCouponCode() || undefined,
+      }),
+    })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          data?: {
+            deliveryFee: number;
+            deliveryDistanceKm: number | null;
+            deliveryRatePerKm: number | null;
+          };
+        };
+        if (!response.ok || !payload.data)
+          throw new Error("Delivery quote unavailable");
+        if (active)
+          setDeliveryQuote({
+            fee: payload.data.deliveryFee,
+            distanceKm: payload.data.deliveryDistanceKm,
+            ratePerKm: payload.data.deliveryRatePerKm ?? 0,
+          });
+      })
+      .catch(() => {
+        if (active)
+          setDeliveryQuote({ fee: 0, distanceKm: null, ratePerKm: 0 });
+      });
+    return () => {
+      active = false;
+    };
+  }, [cart, deliveryCoordinates, items]);
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   const clientSubtotal = items.reduce(
     (sum, item) => sum + item.product.price * item.quantity,
@@ -419,7 +450,8 @@ export default function CheckoutExperience() {
   );
   const subtotal = checkoutSession?.subtotal ?? clientSubtotal;
   const deliveryFee =
-    checkoutSession?.deliveryFee ?? (items.length ? deliveryQuote.fee : 0);
+    checkoutSession?.deliveryFee ??
+    (items.length && deliveryCoordinates ? deliveryQuote.fee : 0);
   const total = checkoutSession?.total ?? subtotal + deliveryFee;
   const failedPaymentCopy =
     paymentFailure === "cancelled"
@@ -532,7 +564,9 @@ export default function CheckoutExperience() {
                 }).format(new Date(snapshot.payment.paidAt))
               : "—",
           });
-          clearCompletedCart();
+          clearCartForCheckout();
+          window.localStorage.removeItem(CHECKOUT_SESSION_KEY);
+          setCart({});
           setStep("complete");
           setToast({
             title: "Payment confirmed",
@@ -576,12 +610,6 @@ export default function CheckoutExperience() {
   const persistCheckoutSession = (session: CheckoutSession) => {
     setCheckoutSession(session);
     window.localStorage.setItem(CHECKOUT_SESSION_KEY, JSON.stringify(session));
-  };
-
-  const clearCompletedCart = () => {
-    clearCartForCheckout();
-    window.localStorage.removeItem(CHECKOUT_SESSION_KEY);
-    setCart({});
   };
 
   const requestPayment = async () => {
@@ -664,10 +692,50 @@ export default function CheckoutExperience() {
     }
   };
 
+  const updateCurrentLocation = async () => {
+    if (isRequestingLocation) return;
+    setIsRequestingLocation(true);
+    try {
+      const current = await getCurrentDeliveryLocation(deliveryInstructions);
+      setDeliveryLocation(current.area);
+      setDeliveryAddress(current.addressLine);
+      setDeliveryCoordinates({
+        latitude: current.latitude,
+        longitude: current.longitude,
+      });
+      saveDeliveryLocation({ ...current, instructions: deliveryInstructions });
+      setToast({ title: "Current location updated" });
+    } catch (error) {
+      setToast({
+        title: "Couldn’t get current location",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Allow location access and try again.",
+      });
+    } finally {
+      setIsRequestingLocation(false);
+    }
+  };
+
   const continueToPayment = async () => {
     if (isAdvancingToPayment) return;
+    if (!deliveryCoordinates || !deliveryLocation || !deliveryAddress) {
+      setToast({
+        title: "Add your current location",
+        description: "Use current location before continuing to payment.",
+      });
+      return;
+    }
     setIsAdvancingToPayment(true);
     try {
+      saveDeliveryLocation({
+        area: deliveryLocation,
+        addressLine: deliveryAddress,
+        latitude: deliveryCoordinates.latitude,
+        longitude: deliveryCoordinates.longitude,
+        instructions: deliveryInstructions.trim(),
+      });
       const created = await responseData<CheckoutSession>(
         await fetch("/api/v1/checkout/orders", {
           method: "POST",
@@ -678,7 +746,13 @@ export default function CheckoutExperience() {
               quantity,
             })),
             customer,
-            delivery: { area: deliveryLocation, addressLine: deliveryLocation },
+            delivery: {
+              area: deliveryLocation,
+              addressLine: deliveryAddress,
+              latitude: deliveryCoordinates.latitude,
+              longitude: deliveryCoordinates.longitude,
+              instructions: deliveryInstructions.trim() || undefined,
+            },
             couponCode: readCouponCode() || undefined,
           }),
         }),
@@ -748,7 +822,8 @@ export default function CheckoutExperience() {
       );
       setToast({
         title: "Payment reported",
-        description: "Our support team will review the M-Pesa receipt for this order.",
+        description:
+          "Our support team will review the M-Pesa receipt for this order.",
       });
       setIsIssueOpen(false);
       setConfirmationCode("");
@@ -803,18 +878,16 @@ export default function CheckoutExperience() {
             </span>
             <span className="hidden h-6 w-px bg-white/35 sm:block" />
             <strong className="truncate text-[13px] font-semibold text-white sm:text-base">
-              {deliveryLocation || "Choose location"}
+              {deliveryAddress || "Add your current location"}
             </strong>
           </div>
           <button
             className="inline-flex min-h-11 shrink-0 items-center gap-1 text-[13px] font-semibold text-tipsy-amber-500 underline decoration-1 underline-offset-4 transition hover:text-tipsy-amber-300 sm:text-base"
-            onClick={() => {
-              setStep("details");
-              setIsEditingAddress(true);
-            }}
+            onClick={() => void updateCurrentLocation()}
+            disabled={isRequestingLocation}
             type="button"
           >
-            Change location{" "}
+            {isRequestingLocation ? "Getting location…" : "Update location"}{" "}
             <StoreIcon className="size-4 sm:size-5" name="arrow-right" />
           </button>
         </div>
@@ -1051,13 +1124,46 @@ export default function CheckoutExperience() {
               </div>
               <div className="mt-5 flex items-center gap-3 rounded-xl bg-tipsy-surface p-4">
                 <StoreIcon className="size-5 shrink-0" name="location" />
-                <div className="min-w-0">
-                  <p className="text-[14px] font-semibold">Delivery address</p>
-                  <p className="mt-1 truncate text-[14px] text-tipsy-muted">
-                    {deliveryLocation || "Your selected delivery area"}
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] font-semibold">
+                    Current delivery location
                   </p>
+                  <p className="mt-1 truncate text-[14px] text-tipsy-muted">
+                    {deliveryAddress || "Location not set"}
+                  </p>
+                  {deliveryLocation ? (
+                    <p className="mt-0.5 text-xs text-tipsy-muted">
+                      Delivery area: {deliveryLocation}
+                    </p>
+                  ) : null}
                 </div>
+                <button
+                  className="shrink-0 text-[13px] font-semibold underline decoration-tipsy-amber-500 decoration-2 underline-offset-4 disabled:opacity-60"
+                  disabled={isRequestingLocation}
+                  onClick={() => void updateCurrentLocation()}
+                  type="button"
+                >
+                  {isRequestingLocation ? "Locating…" : "Update"}
+                </button>
               </div>
+              {!deliveryCoordinates ? (
+                <p className="mt-3 text-sm text-red-700">
+                  Use current location to continue checkout.
+                </p>
+              ) : null}
+              <label className="mt-4 grid gap-2 text-[14px] font-medium">
+                Extra directions{" "}
+                <span className="font-normal text-tipsy-muted">(optional)</span>
+                <textarea
+                  className="min-h-20 rounded-xl border border-[#d8d1c6] bg-white px-3 py-2.5 text-[15px] font-normal transition outline-none placeholder:text-tipsy-muted focus:border-tipsy-amber-500 focus:ring-2 focus:ring-tipsy-amber-100"
+                  maxLength={500}
+                  onChange={(event) =>
+                    setDeliveryInstructions(event.target.value)
+                  }
+                  placeholder="e.g. Hostel name and room number"
+                  value={deliveryInstructions}
+                />
+              </label>
               <button
                 className="mt-7 h-13 w-full rounded-xl bg-tipsy-amber-500 text-[16px] font-semibold text-tipsy-ink disabled:opacity-70"
                 disabled={isAdvancingToPayment}
@@ -1240,7 +1346,7 @@ export default function CheckoutExperience() {
           {step === "tracking" && checkoutSession ? (
             <section className={`${surfaceClass} checkout-step-enter mt-6 p-5`}>
               <OrderTracking
-                location={deliveryLocation}
+                location={deliveryAddress || deliveryLocation}
                 orderNumber={checkoutSession.orderNumber}
                 orderStatus={orderSnapshot?.status ?? "CONFIRMED"}
               />
@@ -1487,65 +1593,57 @@ export default function CheckoutExperience() {
                   </label>
                 </div>
                 <div className="mt-5 rounded-xl bg-tipsy-surface px-4 py-4">
-                  {isEditingAddress ? (
-                    <div>
-                      <label className="grid gap-2 text-[14px] font-medium">
-                        Delivery address
-                        <input
-                          autoFocus
-                          className="h-12 rounded-xl border border-[#d8d1c6] bg-white px-4 text-[15px] font-medium transition outline-none focus:border-tipsy-amber-500 focus:ring-2 focus:ring-tipsy-amber-100"
-                          onChange={(event) =>
-                            setDeliveryLocation(event.target.value)
-                          }
-                          value={deliveryLocation}
-                        />
-                      </label>
-                      <div className="mt-3 flex gap-3">
-                        <button
-                          className="rounded-lg bg-tipsy-ink px-4 py-2 text-[14px] font-semibold text-white transition hover:bg-tipsy-amber-700"
-                          onClick={() => {
-                            saveDeliveryLocation(deliveryLocation);
-                            setIsEditingAddress(false);
-                            setToast({ title: "Delivery address updated" });
-                          }}
-                          type="button"
-                        >
-                          Save
-                        </button>
-                        <button
-                          className="rounded-lg px-3 py-2 text-[14px] font-medium text-tipsy-muted transition hover:text-tipsy-ink"
-                          onClick={() => {
-                            setDeliveryLocation(readDeliveryLocation());
-                            setIsEditingAddress(false);
-                          }}
-                          type="button"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-3">
-                      <StoreIcon className="size-5 shrink-0" name="location" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[13px] font-medium text-tipsy-muted">
-                          Delivery address
+                  <div className="flex items-center gap-3">
+                    <StoreIcon className="size-5 shrink-0" name="location" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-medium text-tipsy-muted">
+                        Current delivery location
+                      </p>
+                      <p className="mt-1 truncate text-[15px] font-semibold text-tipsy-ink">
+                        {deliveryAddress || "Location not set"}
+                      </p>
+                      {deliveryLocation ? (
+                        <p className="mt-0.5 text-xs text-tipsy-muted">
+                          Delivery area: {deliveryLocation}
                         </p>
-                        <p className="mt-1 truncate text-[15px] font-semibold text-tipsy-ink">
-                          {deliveryLocation || "Your selected delivery area"}
-                        </p>
-                      </div>
-                      <button
-                        aria-label="Edit delivery address"
-                        className="inline-flex shrink-0 items-center gap-1.5 text-[13px] font-semibold text-tipsy-ink underline decoration-tipsy-amber-500 decoration-2 underline-offset-4"
-                        onClick={() => setIsEditingAddress(true)}
-                        type="button"
-                      >
-                        <StoreIcon className="size-4" name="pencil" />
-                        Edit
-                      </button>
+                      ) : null}
                     </div>
-                  )}
+                    <button
+                      aria-label="Update current location"
+                      className="inline-flex shrink-0 items-center gap-1.5 text-[13px] font-semibold text-tipsy-ink underline decoration-tipsy-amber-500 decoration-2 underline-offset-4 disabled:opacity-60"
+                      disabled={isRequestingLocation}
+                      onClick={() => void updateCurrentLocation()}
+                      type="button"
+                    >
+                      <StoreIcon
+                        className="size-4"
+                        name={
+                          isRequestingLocation ? "current-location" : "pencil"
+                        }
+                      />
+                      {isRequestingLocation ? "Locating…" : "Update"}
+                    </button>
+                  </div>
+                  {!deliveryCoordinates ? (
+                    <p className="mt-3 text-sm text-red-700">
+                      Use current location to continue checkout.
+                    </p>
+                  ) : null}
+                  <label className="mt-4 grid gap-2 text-[13px] font-medium text-tipsy-ink">
+                    Extra directions{" "}
+                    <span className="font-normal text-tipsy-muted">
+                      (optional)
+                    </span>
+                    <textarea
+                      className="min-h-20 rounded-xl border border-[#d8d1c6] bg-white px-3 py-2.5 text-[14px] font-normal transition outline-none placeholder:text-tipsy-muted focus:border-tipsy-amber-500 focus:ring-2 focus:ring-tipsy-amber-100"
+                      maxLength={500}
+                      onChange={(event) =>
+                        setDeliveryInstructions(event.target.value)
+                      }
+                      placeholder="e.g. Hostel name and room number"
+                      value={deliveryInstructions}
+                    />
+                  </label>
                 </div>
                 <div className="mt-4 flex items-center gap-3 rounded-xl bg-[#f3f6f2] px-4 py-3.5">
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-white text-tipsy-olive">
@@ -1553,12 +1651,12 @@ export default function CheckoutExperience() {
                   </span>
                   <div>
                     <p className="text-[13px] font-semibold text-tipsy-ink">
-                      Delivery to {deliveryLocation || "your selected area"}
+                      Delivery to {deliveryAddress || "your current location"}
                     </p>
                     <p className="mt-0.5 text-[13px] text-tipsy-muted">
                       Delivery fee: {formatPrice(deliveryFee)}
-                      {deliveryQuote.minMinutes && deliveryQuote.maxMinutes
-                        ? ` · Estimated ${deliveryQuote.minMinutes}–${deliveryQuote.maxMinutes} minutes`
+                      {deliveryQuote.distanceKm !== null
+                        ? ` · approx. ${deliveryQuote.distanceKm.toFixed(1)} km × ${formatPrice(deliveryQuote.ratePerKm)}/km`
                         : ""}
                     </p>
                   </div>
@@ -1672,7 +1770,9 @@ export default function CheckoutExperience() {
                     onSubmit={reportPaymentIssue}
                   >
                     <p className="mb-4 text-sm leading-5 text-tipsy-muted">
-                      If you approved the prompt and received an M-Pesa message, send its receipt code to support. We will review it against this order.
+                      If you approved the prompt and received an M-Pesa message,
+                      send its receipt code to support. We will review it
+                      against this order.
                     </p>
                     <label className="grid gap-2 text-[13px] font-semibold">
                       M-Pesa receipt code
@@ -1840,7 +1940,7 @@ export default function CheckoutExperience() {
             {step === "tracking" && checkoutSession ? (
               <section className={`${surfaceClass} mt-5 p-6`}>
                 <OrderTracking
-                  location={deliveryLocation}
+                  location={deliveryAddress || deliveryLocation}
                   orderNumber={checkoutSession.orderNumber}
                   orderStatus={orderSnapshot?.status ?? "CONFIRMED"}
                 />

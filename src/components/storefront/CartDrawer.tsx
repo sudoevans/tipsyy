@@ -8,7 +8,7 @@ import { formatPrice } from "./currency";
 import type { StoreProduct } from "./data";
 import StoreIcon from "./StoreIcon";
 import {
-  readDeliveryLocation,
+  readDeliveryDetails,
   saveCartForCheckout,
   saveCouponCode,
 } from "./cartStorage";
@@ -24,6 +24,7 @@ async function requestCartQuote(
   items: CartDrawerProps["items"],
   code?: string,
 ) {
+  const location = readDeliveryDetails();
   const response = await fetch("/api/v1/cart/quote", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -32,7 +33,12 @@ async function requestCartQuote(
         productSlug: product.id,
         quantity,
       })),
-      deliveryArea: readDeliveryLocation() || undefined,
+      delivery: location
+        ? {
+            latitude: location.latitude,
+            longitude: location.longitude,
+          }
+        : undefined,
       couponCode: code || undefined,
     }),
   });
@@ -61,6 +67,7 @@ export default function CartDrawer({
     amount: number;
   } | null>(null);
   const [quotedDeliveryFee, setQuotedDeliveryFee] = useState(0);
+  const [locationRevision, setLocationRevision] = useState(0);
   const [promoFeedback, setPromoFeedback] = useState<{
     isError: boolean;
     message: string;
@@ -95,6 +102,20 @@ export default function CartDrawer({
   };
 
   useEffect(() => {
+    const onLocationChange = () =>
+      setLocationRevision((revision) => revision + 1);
+    window.addEventListener(
+      "tipsy:delivery-location-changed",
+      onLocationChange,
+    );
+    return () =>
+      window.removeEventListener(
+        "tipsy:delivery-location-changed",
+        onLocationChange,
+      );
+  }, []);
+
+  useEffect(() => {
     if (!items.length) return;
     let active = true;
     void requestCartQuote(items)
@@ -105,7 +126,7 @@ export default function CartDrawer({
     return () => {
       active = false;
     };
-  }, [items]);
+  }, [items, locationRevision]);
 
   const applyPromo = async () => {
     const code = promoCode.trim().toUpperCase();

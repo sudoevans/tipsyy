@@ -3,6 +3,7 @@ import { z } from "zod";
 import { evaluateInventoryNotifications } from "./admin-notifications";
 import { sql, type Transaction, withTransaction } from "./db";
 import { ApiError } from "./http";
+import { calculateDeliveryPrice } from "./delivery-pricing";
 import {
   createOpaqueToken,
   hashSecret,
@@ -23,8 +24,8 @@ export const createOrderSchema = z.object({
   delivery: z.object({
     area: z.string().trim().min(2).max(160),
     addressLine: z.string().trim().min(2).max(240),
-    latitude: z.number().min(-90).max(90).optional(),
-    longitude: z.number().min(-180).max(180).optional(),
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
     instructions: z.string().trim().max(500).optional(),
   }),
   couponCode: z.string().trim().max(40).optional(),
@@ -34,7 +35,12 @@ export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 
 export const cartQuoteSchema = z.object({
   items: z.array(checkoutItemSchema).min(1).max(100),
-  deliveryArea: z.string().trim().max(160).optional(),
+  delivery: z
+    .object({
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+    })
+    .optional(),
   couponCode: z.string().trim().max(40).optional(),
 });
 
@@ -50,16 +56,6 @@ interface ProductRow {
   price_minor: number;
   on_hand_quantity: number;
   reserved_quantity: number;
-}
-
-interface DeliveryAreaRow {
-  id: string;
-  slug: string;
-  name: string;
-  secondary_name: string | null;
-  fee_minor: number;
-  estimated_min_minutes: number | null;
-  estimated_max_minutes: number | null;
 }
 
 interface CouponRow {
@@ -344,19 +340,11 @@ export async function createCheckoutOrder(
     );
 
   return withTransaction(async (tx) => {
-    const [deliveryArea] = await tx<DeliveryAreaRow[]>`
-      SELECT id, slug, name, secondary_name, fee_minor, estimated_min_minutes, estimated_max_minutes
-      FROM delivery_areas
-      WHERE active = true AND (slug = ${input.delivery.area} OR lower(name) = lower(${input.delivery.area}))
-      LIMIT 1
-    `;
-    if (!deliveryArea) {
-      throw new ApiError(
-        422,
-        "UNSERVICEABLE_LOCATION",
-        "We do not currently deliver to that location. Choose a supported delivery area.",
-      );
-    }
+    const deliveryPrice = await calculateDeliveryPrice(
+      tx,
+      input.delivery.latitude,
+      input.delivery.longitude,
+    );
 
     const slugs = [...quantities.keys()];
     const rows = await tx<ProductRow[]>`
@@ -411,7 +399,7 @@ export async function createCheckoutOrder(
       items,
       subtotal,
     );
-    const total = subtotal - discount + deliveryArea.fee_minor;
+    const total = subtotal - discount + deliveryPrice.feeMinor;
     const reservationExpiresAt = new Date(
       Date.now() + RESERVATION_MINUTES * 60_000,
     );
@@ -421,24 +409,24 @@ export async function createCheckoutOrder(
       phone,
     );
     const address = {
-      areaSlug: deliveryArea.slug,
-      areaName: deliveryArea.name,
-      secondaryName: deliveryArea.secondary_name,
+      storeName: deliveryPrice.store.name,
+      storeAddress: deliveryPrice.store.address,
       addressLine: input.delivery.addressLine,
       latitude: input.delivery.latitude,
       longitude: input.delivery.longitude,
+      distanceKm: Math.round(deliveryPrice.distanceKm * 100) / 100,
     };
 
     const [order] = await tx<
       { id: string; order_number: string; created_at: Date }[]
     >`
       INSERT INTO orders (
-        access_token_hash, user_id, cart_id, delivery_area_id, customer_name, customer_phone, delivery_address,
+        access_token_hash, user_id, cart_id, fulfillment_store_id, delivery_distance_km, customer_name, customer_phone, delivery_address,
         delivery_instructions, subtotal_minor, discount_minor, delivery_fee_minor, total_minor,
         coupon_code, reservation_expires_at
       ) VALUES (
-        ${accessTokenHash}, ${customerUserId}, ${cartId ?? null}, ${deliveryArea.id}, ${input.customer.name.trim()}, ${phone}, ${tx.json(address)},
-        ${input.delivery.instructions ?? null}, ${subtotal}, ${discount}, ${deliveryArea.fee_minor}, ${total},
+        ${accessTokenHash}, ${customerUserId}, ${cartId ?? null}, ${deliveryPrice.store.id}, ${Math.round(deliveryPrice.distanceKm * 100) / 100}, ${input.customer.name.trim()}, ${phone}, ${tx.json(address)},
+        ${input.delivery.instructions ?? null}, ${subtotal}, ${discount}, ${deliveryPrice.feeMinor}, ${total},
         ${input.couponCode?.toUpperCase() ?? null}, ${reservationExpiresAt}
       )
       RETURNING id, order_number, created_at
@@ -496,14 +484,15 @@ export async function createCheckoutOrder(
       currency: "KES",
       subtotal,
       discount,
-      deliveryFee: deliveryArea.fee_minor,
+      deliveryFee: deliveryPrice.feeMinor,
+      deliveryDistanceKm: Math.round(deliveryPrice.distanceKm * 100) / 100,
       total,
       reservationExpiresAt: reservationExpiresAt.toISOString(),
       delivery: {
-        area: deliveryArea.name,
+        area: deliveryPrice.store.name,
         addressLine: input.delivery.addressLine,
-        estimatedMinMinutes: deliveryArea.estimated_min_minutes,
-        estimatedMaxMinutes: deliveryArea.estimated_max_minutes,
+        estimatedMinMinutes: null,
+        estimatedMaxMinutes: null,
       },
       items: items.map((item) => ({
         productSlug: item.product_slug,
@@ -584,24 +573,24 @@ export async function quoteCart(input: z.infer<typeof cartQuoteSchema>) {
       items,
       subtotal,
     );
-    let deliveryFee = 0;
-    if (input.deliveryArea) {
-      const [area] = await tx<{ fee_minor: number }[]>`
-        SELECT fee_minor FROM delivery_areas WHERE active = true AND (slug = ${input.deliveryArea} OR lower(name) = lower(${input.deliveryArea})) LIMIT 1
-      `;
-      if (!area)
-        throw new ApiError(
-          422,
-          "UNSERVICEABLE_LOCATION",
-          "Choose a supported delivery area.",
-        );
-      deliveryFee = area.fee_minor;
-    }
+    const delivery = input.delivery
+      ? await calculateDeliveryPrice(
+          tx,
+          input.delivery.latitude,
+          input.delivery.longitude,
+        )
+      : null;
+    const deliveryFee = delivery?.feeMinor ?? 0;
     return {
       currency: "KES",
       subtotal,
       discount,
       deliveryFee,
+      deliveryDistanceKm: delivery
+        ? Math.round(delivery.distanceKm * 100) / 100
+        : null,
+      deliveryRatePerKm: delivery?.rateMinor ?? null,
+      storeName: delivery?.store.name ?? null,
       total: subtotal - discount + deliveryFee,
     };
   });
