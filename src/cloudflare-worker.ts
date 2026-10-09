@@ -1,5 +1,6 @@
 // @ts-ignore `.open-next/worker.js` is generated after Next's type-check completes.
 import generatedWorker from "../.open-next/worker.js";
+import { withRequestDatabaseClient } from "./server/db";
 
 type WorkerEnvironment = {
   APP_URL?: string;
@@ -35,7 +36,8 @@ function setRuntimeBindings(env: WorkerEnvironment) {
 
 function fetch(request: Request, env: WorkerEnvironment, context: WorkerContext) {
   setRuntimeBindings(env);
-  return app.fetch(request, env, context);
+  if (!env.HYPERDRIVE?.connectionString) return app.fetch(request, env, context);
+  return withRequestDatabaseClient(env.HYPERDRIVE.connectionString, () => app.fetch(request, env, context));
 }
 
 async function runMaintenance(env: WorkerEnvironment, context: WorkerContext) {
@@ -45,14 +47,23 @@ async function runMaintenance(env: WorkerEnvironment, context: WorkerContext) {
   }
 
   const url = new URL("/api/v1/internal/maintenance", env.APP_URL);
-  const response = await app.fetch(
-    new Request(url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${env.INTERNAL_JOB_SECRET}` },
-    }),
-    env,
-    context,
-  );
+  const response = env.HYPERDRIVE?.connectionString
+    ? await withRequestDatabaseClient(env.HYPERDRIVE.connectionString, () => app.fetch(
+        new Request(url, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${env.INTERNAL_JOB_SECRET}` },
+        }),
+        env,
+        context,
+      ))
+    : await app.fetch(
+        new Request(url, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${env.INTERNAL_JOB_SECRET}` },
+        }),
+        env,
+        context,
+      );
   if (!response.ok) {
     throw new Error(`Maintenance request failed with ${response.status}.`);
   }

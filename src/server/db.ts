@@ -1,11 +1,15 @@
 import postgres from "postgres";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 import { getServerEnv } from "./env";
 
 const globalDatabase = globalThis as typeof globalThis & {
   tipsySql?: postgres.Sql;
+  tipsyDatabaseStorage?: AsyncLocalStorage<postgres.Sql>;
 };
+
+const requestDatabaseStorage = globalDatabase.tipsyDatabaseStorage ??= new AsyncLocalStorage<postgres.Sql>();
 
 type HyperdriveEnvironment = {
   HYPERDRIVE?: {
@@ -31,6 +35,8 @@ function getDatabaseUrl() {
 let databaseClient: postgres.Sql | undefined;
 
 function getDatabaseClient() {
+  const requestClient = requestDatabaseStorage.getStore();
+  if (requestClient) return requestClient;
   if (databaseClient) return databaseClient;
   databaseClient = globalDatabase.tipsySql ?? postgres(getDatabaseUrl(), {
     max: 5,
@@ -41,6 +47,17 @@ function getDatabaseClient() {
   });
   if (process.env.NODE_ENV !== "production") globalDatabase.tipsySql = databaseClient;
   return databaseClient;
+}
+
+export async function withRequestDatabaseClient<T>(connectionString: string, work: () => Promise<T>) {
+  const client = postgres(connectionString, {
+    max: 5,
+    idle_timeout: 10,
+    connect_timeout: 5,
+    fetch_types: false,
+    prepare: true,
+  });
+  return requestDatabaseStorage.run(client, work);
 }
 
 const sqlProxy = function sqlProxy(this: unknown, ...args: unknown[]) {
