@@ -36,7 +36,14 @@ async function writeCartItems(cart: CartSnapshot) {
 
 export function confirmCartForCheckout(cart: CartSnapshot) {
   window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
-  const request = cartWriteQueue.catch(() => undefined).then(() => writeCartItems(cart));
+  const request = cartWriteQueue
+    .catch(() => undefined)
+    .then(() => writeCartItems(cart))
+    .catch(() => {
+      // Keep the cart usable if the background server sync is temporarily
+      // unavailable. Checkout always validates stock and pricing again.
+      return cart;
+    });
   cartWriteQueue = request.catch(() => undefined);
   return request;
 }

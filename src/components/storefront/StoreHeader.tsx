@@ -190,7 +190,13 @@ export default function StoreHeader({ cartCount, onCartOpen, onCategorySelect, o
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const payload = await response.json() as { data?: ServiceabilityResult; error?: { message?: string } };
+    const rawPayload = await response.text();
+    let payload: { data?: ServiceabilityResult; error?: { message?: string } };
+    try {
+      payload = JSON.parse(rawPayload) as { data?: ServiceabilityResult; error?: { message?: string } };
+    } catch {
+      throw new Error("We could not check that delivery area. Please try again.");
+    }
     if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? "We could not check that delivery area.");
     return payload.data;
   };
