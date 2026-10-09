@@ -23,8 +23,21 @@ export default function proxy(request: NextRequest) {
 
   if (ADMIN_API_PATH.test(pathname)) return NextResponse.next();
 
-  if (hostname === ADMIN_HOSTNAME && pathname === "/") {
-    return NextResponse.redirect(new URL("/admin", request.url));
+  if (hostname === ADMIN_HOSTNAME) {
+    const legacyAdminPath = pathname.match(/^\/(?:en\/)?admin(?:\/(.*))?$/i);
+    if (legacyAdminPath) {
+      const canonicalUrl = request.nextUrl.clone();
+      canonicalUrl.pathname = legacyAdminPath[1]
+        ? `/${legacyAdminPath[1]}`
+        : "/";
+      return NextResponse.redirect(canonicalUrl);
+    }
+
+    // Keep the admin app's existing route tree while exposing clean URLs on
+    // the admin hostname: / -> /admin and /login -> /admin/login internally.
+    const adminUrl = request.nextUrl.clone();
+    adminUrl.pathname = `/en/admin${pathname === "/" ? "" : pathname}`;
+    return NextResponse.rewrite(adminUrl);
   }
 
   return handleIntlRouting(request);
