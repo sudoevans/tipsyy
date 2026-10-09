@@ -12,9 +12,36 @@ interface PromoHeroProps {
 
 interface PromoSlide { category: CategoryId; id: string; imageUrl: string; eyebrow: string; title: string; description: string }
 
+const fallbackSlides: PromoSlide[] = [
+  {
+    id: "kc-pineapple-feature",
+    category: "spirits",
+    imageUrl: "https://pub-46248483ce91410896c8059df927180c.r2.dev/products/kc-pineapple.jpg",
+    eyebrow: "Tipsy Theoryy favourites",
+    title: "Find your next favourite",
+    description: "Shop the drinks and essentials available in your area.",
+  },
+  {
+    id: "captain-morgan-feature",
+    category: "whisky",
+    imageUrl: "https://pub-46248483ce91410896c8059df927180c.r2.dev/products/captain-morgan-gold.jpg",
+    eyebrow: "Good company starts here",
+    title: "A good pour for every plan",
+    description: "Browse our current selection and order for delivery.",
+  },
+  {
+    id: "four-cousins-feature",
+    category: "wine",
+    imageUrl: "https://pub-46248483ce91410896c8059df927180c.r2.dev/products/4th-street.jpg",
+    eyebrow: "Made for sharing",
+    title: "Make the moment yours",
+    description: "Choose from the products currently in stock.",
+  },
+];
+
 export default function PromoHero({ onShop }: PromoHeroProps) {
   const t = useTranslations("storefront");
-  const [slides, setSlides] = useState<PromoSlide[]>([]);
+  const [slides, setSlides] = useState<PromoSlide[]>(fallbackSlides);
   const [trackIndex, setTrackIndex] = useState(1);
   const [isResetting, setIsResetting] = useState(false);
   const activeSlide = slides.length ? (trackIndex - 1 + slides.length) % slides.length : 0;
@@ -27,15 +54,16 @@ export default function PromoHero({ onShop }: PromoHeroProps) {
   useEffect(() => {
     let active = true;
     void fetch("/api/v1/content/home", { cache: "no-store" }).then((response) => response.json() as Promise<{ data?: { banners?: Array<Record<string, unknown>> } }>).then((payload) => {
-      if (!active || !Array.isArray(payload.data?.banners)) return;
-      setSlides(payload.data.banners.map((banner: Record<string, unknown>) => ({
+      if (!active || !Array.isArray(payload.data?.banners) || payload.data.banners.length === 0) return;
+      const contentSlides = payload.data.banners.filter((banner) => typeof banner.image_url === "string" && banner.image_url.trim().length > 0).map((banner: Record<string, unknown>) => ({
         id: String(banner.key),
         category: String(banner.link_url ?? "/whisky").replace(/^\//, "") as CategoryId,
         imageUrl: String(banner.image_url),
         eyebrow: String((banner.metadata as Record<string, unknown> | undefined)?.eyebrow ?? ""),
         title: String(banner.title ?? ""),
         description: String(banner.body ?? ""),
-      })));
+      }));
+      if (contentSlides.length) setSlides(contentSlides);
     }).catch(() => undefined);
     return () => { active = false; };
   }, []);

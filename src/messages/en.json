@@ -50,10 +50,10 @@
       "whisky": "Whisky",
       "spirits": "Spirits",
       "rum": "Rum",
-      "beer": "Beer",
-      "wine": "Wine",
+      "beer": "Beers",
+      "wine": "Wines",
       "vodka": "Vodka",
-      "mixers": "Mixers",
+      "mixers": "Chasers",
       "gin": "Gin",
       "smokes": "Smokes"
     },
@@ -68,6 +68,9 @@
     "pricingComingSoon": "Price coming soon",
     "notAvailable": "Not available yet",
     "newProduct": "New arrival",
+    "inStock": "In stock",
+    "outOfStock": "Out of stock",
+    "stockRemaining": "{count} left",
     "promo": {
       "label": "Promotions",
       "cta": "Shop now",

@@ -56,6 +56,11 @@ export default function ProductDetails({ product }: ProductDetailsProps) {
     size: selectedVariant.size,
   };
   const available = product.available ?? true;
+  const stockLabel = product.availableQuantity === 0
+    ? t("outOfStock")
+    : product.availableQuantity !== undefined && product.availableQuantity <= 3
+      ? t("stockRemaining", { count: product.availableQuantity })
+      : t("inStock");
   const cartCount = Object.values(cart).reduce(
     (sum, itemQuantity) => sum + itemQuantity,
     0,
@@ -216,18 +221,10 @@ export default function ProductDetails({ product }: ProductDetailsProps) {
             </h1>
             <div className="mt-3 flex items-center gap-3">
               <p className="text-xl font-bold text-tipsy-ink">
-                {available
-                  ? formatPrice(selectedVariant.price)
-                  : t("pricingComingSoon")}
+                {formatPrice(selectedVariant.price)}
               </p>
-              <span className="text-sm font-semibold text-tipsy-muted">
-                {product.rating === "New" ? (
-                  t("newProduct")
-                ) : (
-                  <>
-                    ★ {product.rating} {t("details.reviews")}
-                  </>
-                )}
+              <span className={`text-sm font-semibold ${product.availableQuantity === 0 ? "text-red-700" : "text-tipsy-muted"}`}>
+                {stockLabel}
               </span>
             </div>
             <p className="mt-5 max-w-xl text-sm leading-6 text-tipsy-muted">

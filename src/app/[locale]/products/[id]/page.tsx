@@ -31,9 +31,9 @@ export default async function ProductDetailsPage({ params }: { params: Promise<{
     name: row.name,
     category: row.category_slug as CategoryId,
     price: row.price_minor,
-    size: row.size_label ?? "",
+    size: row.size_label && !["standard", "option 1"].includes(row.size_label.trim().toLocaleLowerCase()) ? row.size_label : "",
     imageUrl: row.image_url ?? undefined,
-    rating: "New",
+    rating: "",
     available: row.available_quantity > 0,
     availableQuantity: row.available_quantity,
   };

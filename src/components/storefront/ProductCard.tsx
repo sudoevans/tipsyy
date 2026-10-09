@@ -22,6 +22,11 @@ export default function ProductCard({ onAdd, onRemove, product, quantity }: Prod
   const name = product.name ?? t(`products.${product.id}.name`);
   const available = product.available ?? true;
   const atStockLimit = product.availableQuantity !== undefined && quantity >= product.availableQuantity;
+  const stockLabel = product.availableQuantity === 0
+    ? t("outOfStock")
+    : product.availableQuantity !== undefined && product.availableQuantity <= 3
+      ? t("stockRemaining", { count: product.availableQuantity })
+      : t("inStock");
   const handleAdd = async () => {
     if (isAdding) return;
     setIsAdding(true);
@@ -39,9 +44,9 @@ export default function ProductCard({ onAdd, onRemove, product, quantity }: Prod
       </div>
       <div className="px-1 pt-3">
         <Link className="block min-h-10 cursor-pointer text-[15px] font-semibold leading-5 text-tipsy-ink transition hover:text-tipsy-amber-700" href={`/products/${product.id}`}><h3 className="line-clamp-2">{name}</h3></Link>
-        <p className="mt-1 min-h-5 text-[13px] text-tipsy-muted">{product.size}</p>
+        <p className="mt-1 min-h-5 text-[13px] text-tipsy-muted">{t(`categories.${product.category}`)}{product.size ? ` · ${product.size}` : ""}</p>
         <div className="mt-2 flex items-center justify-between gap-2">
-          <div><p className="text-[16px] font-bold tracking-[-0.025em] text-tipsy-ink">{available ? formatPrice(product.price) : t("pricingComingSoon")}</p><p className="mt-1 text-xs font-medium text-tipsy-muted">{available && product.availableQuantity !== undefined && product.availableQuantity <= 3 ? `${product.availableQuantity} left` : product.rating === "New" ? t("newProduct") : <><span className="text-tipsy-amber-700">★</span> {product.rating}</>}</p></div>
+          <div><p className="text-[16px] font-bold tracking-[-0.025em] text-tipsy-ink">{formatPrice(product.price)}</p><p className={`mt-1 text-xs font-medium ${product.availableQuantity === 0 ? "text-red-700" : "text-tipsy-muted"}`}>{stockLabel}</p></div>
           {available ? quantity ? <div aria-label={t("quantityFor", { product: name, quantity })} className="flex h-10 items-center rounded-xl border border-tipsy-line bg-tipsy-surface p-0.5">
             <button aria-label={t("removeOne", { product: name })} className="flex size-9 items-center justify-center rounded-[10px] text-tipsy-ink transition hover:bg-white" onClick={onRemove} type="button"><StoreIcon className="size-4" name="minus" /></button>
             <span className="w-6 text-center text-xs font-bold">{quantity}</span>
