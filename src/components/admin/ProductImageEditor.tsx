@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Edit01Icon,
@@ -42,8 +42,6 @@ export default function ProductImageEditor({
   const [retrieving, setRetrieving] = useState(false);
   const [error, setError] = useState("");
   const [saving, startSaving] = useTransition();
-
-  useEffect(() => setCurrentImage(imageUrl), [imageUrl]);
 
   const beginEdit = () => {
     setDraftImage(currentImage ?? "");

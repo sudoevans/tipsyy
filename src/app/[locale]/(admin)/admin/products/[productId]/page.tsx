@@ -82,6 +82,7 @@ export default async function EditProductPage({
       <div className="grid gap-4 xl:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
         <section className="flex rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
           <ProductImageEditor
+            key={product.image_url ?? "no-image"}
             productId={product.id}
             productName={product.name}
             imageUrl={product.image_url}

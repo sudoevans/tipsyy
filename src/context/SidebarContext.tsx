@@ -38,7 +38,8 @@ export const SidebarProvider: React.FC<{ children: React.ReactNode }> = ({
   const pathname = usePathname();
   // Close sidebar on route change (for mobile)
   useEffect(() => {
-    setIsMobileOpen(false);
+    const closeAfterNavigation = window.setTimeout(() => setIsMobileOpen(false), 0);
+    return () => window.clearTimeout(closeAfterNavigation);
   }, [pathname]);
 
   useEffect(() => {

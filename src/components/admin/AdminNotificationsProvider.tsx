@@ -83,11 +83,11 @@ export function AdminNotificationsProvider({
   }, []);
 
   useEffect(() => {
-    void refresh();
+    const initialRefresh = window.setTimeout(() => void refresh(), 0);
     const onVisibility = () => { if (document.visibilityState === "visible") void refresh(); };
     document.addEventListener("visibilitychange", onVisibility);
     const interval = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 20_000);
-    return () => { document.removeEventListener("visibilitychange", onVisibility); window.clearInterval(interval); };
+    return () => { window.clearTimeout(initialRefresh); document.removeEventListener("visibilitychange", onVisibility); window.clearInterval(interval); };
   }, [refresh]);
 
   const value = useMemo(() => ({ summary, notifications, total, loading, refresh, loadMore, markRead, markAllRead }), [summary, notifications, total, loading, refresh, loadMore, markRead, markAllRead]);

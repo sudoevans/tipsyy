@@ -511,6 +511,7 @@ const Calendar: React.FC = () => {
       </div>
 
       <CalendarEventModal
+        key={`${isOpen ? "open" : "closed"}-${selectedEvent?.id ?? "new"}-${selectedStartDate}-${selectedEndDate}`}
         isOpen={isOpen}
         onClose={closeModal}
         selectedEvent={selectedEvent}

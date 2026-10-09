@@ -2,19 +2,20 @@
 
 import { AlertCircleIcon, CheckCircleIcon, InfoCircleIcon, XCloseIcon } from "@untitledui/icons-react/outline";
 import { createPortal } from "react-dom";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 type ToastTone = "success" | "error" | "info";
 type Toast = { title: string; description?: string; tone?: ToastTone } | null;
 type ToastContextValue = { showToast: (toast: Exclude<Toast, null>) => void };
 const StorefrontToastContext = createContext<ToastContextValue | null>(null);
+const subscribeToMount = () => () => {};
+const getClientMountSnapshot = () => true;
+const getServerMountSnapshot = () => false;
 
 export function StorefrontToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<Toast>(null);
-  const [isMounted, setIsMounted] = useState(false);
+  const isMounted = useSyncExternalStore(subscribeToMount, getClientMountSnapshot, getServerMountSnapshot);
   const showToast = useCallback((nextToast: Exclude<Toast, null>) => setToast(nextToast), []);
-
-  useEffect(() => setIsMounted(true), []);
 
   useEffect(() => {
     if (!toast) return;

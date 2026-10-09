@@ -2,7 +2,7 @@
 
 import { Modal } from "@/components/ui/modal";
 import { cn } from "@/utils";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   CALENDAR_EVENT_LEVELS,
   type CalendarEvent,
@@ -26,36 +26,18 @@ const CalendarEventModal: React.FC<CalendarEventModalProps> = ({
   initialEndDate = "",
   onSave,
 }) => {
-  const [eventTitle, setEventTitle] = useState("");
-  const [eventStartDate, setEventStartDate] = useState("");
-  const [eventEndDate, setEventEndDate] = useState("");
-  const [eventLevel, setEventLevel] = useState("Primary");
-
-  useEffect(() => {
-    if (selectedEvent) {
-      setEventTitle((selectedEvent.title as string) || "");
-      const startStr =
-        typeof selectedEvent.start === "string"
-          ? selectedEvent.start.split("T")[0]
-          : selectedEvent.start instanceof Date
-            ? selectedEvent.start.toISOString().split("T")[0]
-            : "";
-      const endStr =
-        typeof selectedEvent.end === "string"
-          ? selectedEvent.end.split("T")[0]
-          : selectedEvent.end instanceof Date
-            ? selectedEvent.end.toISOString().split("T")[0]
-            : "";
-      setEventStartDate(startStr);
-      setEventEndDate(endStr || startStr);
-      setEventLevel(selectedEvent.extendedProps?.calendar || "Primary");
-    } else {
-      setEventTitle("");
-      setEventStartDate(initialStartDate);
-      setEventEndDate(initialEndDate || initialStartDate);
-      setEventLevel("Primary");
-    }
-  }, [selectedEvent, initialStartDate, initialEndDate, isOpen]);
+  const eventDate = (value: unknown) => {
+    if (typeof value === "string") return value.split("T")[0];
+    if (value instanceof Date) return value.toISOString().split("T")[0];
+    return "";
+  };
+  const initialStart = selectedEvent ? eventDate(selectedEvent.start) : initialStartDate;
+  const [eventTitle, setEventTitle] = useState((selectedEvent?.title as string) || "");
+  const [eventStartDate, setEventStartDate] = useState(initialStart);
+  const [eventEndDate, setEventEndDate] = useState(
+    selectedEvent ? eventDate(selectedEvent.end) || initialStart : initialEndDate || initialStartDate,
+  );
+  const [eventLevel, setEventLevel] = useState(selectedEvent?.extendedProps?.calendar || "Primary");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
