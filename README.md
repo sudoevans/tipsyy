@@ -240,10 +240,17 @@ If you find this project helpful, please consider giving it a star on GitHub. Yo
 
 The operations portal uses a dedicated username/password session at `/admin/login`. It does not use customer OTP or Google authentication and has no public registration flow.
 
-Create or reset an administrator from the command line after running migrations:
+Create or reset the initial full-access administrator from the command line after running migrations. The script loads `.env` / `.env.local`; it stores only a scrypt password hash in the database and does not run automatically when the app starts or deploys.
 
-```powershell
-$env:TIPSY_ADMIN_PASSWORD="use-a-long-unique-password"
-npm run admin:create -- operations "Operations Admin"
-Remove-Item Env:TIPSY_ADMIN_PASSWORD
+```dotenv filename=".env"
+DATABASE_URL=postgresql://<production-db-connection>
+TIPSY_ADMIN_USERNAME=superadmin
+TIPSY_ADMIN_DISPLAY_NAME=Super Admin
+TIPSY_ADMIN_PASSWORD=<unique-password-at-least-12-characters>
 ```
+
+```sh
+npm run admin:create
+```
+
+Use a direct PostgreSQL connection for this one-time CLI command; Cloudflare Hyperdrive bindings are available to the deployed Worker, not to this local script. Remove `TIPSY_ADMIN_PASSWORD` from the local environment file after creating the account. Then sign in at `/admin/login` and use the Staff section to add other admin/support accounts.
