@@ -29,6 +29,7 @@ type CheckoutToast = { description?: string; title: string };
 type PaymentFailureKind =
   | "cancelled"
   | "expired_before_prompt"
+  | "reconciling"
   | "timed_out"
   | "failed";
 interface PaymentReceipt {
@@ -56,6 +57,7 @@ interface CheckoutSession {
   subtotal: number;
   total: number;
   items?: CheckoutLineItem[];
+  paymentInitiatedAt?: string;
 }
 
 interface OrderSnapshot {
@@ -83,6 +85,7 @@ function paymentFailureKind(snapshot: OrderSnapshot): PaymentFailureKind | null 
   )
     return snapshot.payment.promptSent ? "cancelled" : "expired_before_prompt";
   if (snapshot.payment.status === "TIMED_OUT") return "timed_out";
+  if (snapshot.payment.status === "RECONCILING") return "reconciling";
   if (
     snapshot.payment.status === "FAILED" ||
     snapshot.status === "PAYMENT_FAILED"
@@ -290,6 +293,7 @@ export default function CheckoutExperience() {
   const mobileDetailsFormRef = useRef<HTMLFormElement>(null);
   const [isSendingPayment, setIsSendingPayment] = useState(false);
   const [isCancellingPayment, setIsCancellingPayment] = useState(false);
+  const [isPaymentStillWaiting, setIsPaymentStillWaiting] = useState(false);
   const [toast, setToast] = useState<CheckoutToast | null>(null);
   const [checkoutSession, setCheckoutSession] =
     useState<CheckoutSession | null>(null);
@@ -474,6 +478,12 @@ export default function CheckoutExperience() {
             description:
               "Your stock hold expired before an M-Pesa prompt was sent. Nothing was charged. Start a new checkout.",
           }
+        : paymentFailure === "reconciling"
+          ? {
+              title: "Payment is being verified",
+              description:
+                "M-Pesa reports that the payment completed, but its receipt callback has not arrived yet. Don’t pay again; contact support with your M-Pesa receipt if you received one.",
+            }
       : paymentFailure === "timed_out"
         ? {
             title: "Payment timed out",
@@ -517,9 +527,51 @@ export default function CheckoutExperience() {
     if (step !== "waiting" || !checkoutSession) return;
     let cancelled = false;
     let timeout: number | undefined;
+    const applySnapshot = (snapshot: OrderSnapshot) => {
+      setOrderSnapshot(snapshot);
+      if (snapshot.payment.status === "SUCCEEDED") {
+        setPaymentReceipt({
+          code: snapshot.payment.receipt ?? "—",
+          paidAt: snapshot.payment.paidAt
+            ? new Intl.DateTimeFormat("en-KE", {
+                dateStyle: "medium",
+                timeStyle: "short",
+              }).format(new Date(snapshot.payment.paidAt))
+            : "—",
+        });
+        clearCartForCheckout();
+        window.localStorage.removeItem(CHECKOUT_SESSION_KEY);
+        setCart({});
+        setStep("complete");
+        setToast({
+          title: "Payment confirmed",
+          description: `Order ${snapshot.orderNumber} is confirmed.`,
+        });
+        return true;
+      }
+      const failure = paymentFailureKind(snapshot);
+      if (failure === "reconciling") {
+        setPaymentFailure(failure);
+        return false;
+      }
+      if (failure) {
+        setPaymentFailure(failure);
+        setStep("failed");
+        setToast({
+          title:
+            failure === "cancelled"
+              ? "Payment cancelled"
+              : "Payment wasn’t completed",
+          description: "Your reserved stock has been released.",
+        });
+        return true;
+      }
+      setPaymentFailure(null);
+      return false;
+    };
     const poll = async () => {
       try {
-        const snapshot = await responseData<OrderSnapshot>(
+        let snapshot = await responseData<OrderSnapshot>(
           await fetch(
             `/api/v1/orders/${encodeURIComponent(checkoutSession.orderNumber)}`,
             {
@@ -531,39 +583,20 @@ export default function CheckoutExperience() {
           ),
         );
         if (cancelled) return;
-        setOrderSnapshot(snapshot);
-        if (snapshot.payment.status === "SUCCEEDED") {
-          setPaymentReceipt({
-            code: snapshot.payment.receipt ?? "—",
-            paidAt: snapshot.payment.paidAt
-              ? new Intl.DateTimeFormat("en-KE", {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                }).format(new Date(snapshot.payment.paidAt))
-              : "—",
-          });
-          clearCartForCheckout();
-          window.localStorage.removeItem(CHECKOUT_SESSION_KEY);
-          setCart({});
-          setStep("complete");
-          setToast({
-            title: "Payment confirmed",
-            description: `Order ${snapshot.orderNumber} is confirmed.`,
-          });
-          return;
-        }
-        const failure = paymentFailureKind(snapshot);
-        if (failure) {
-          setPaymentFailure(failure);
-          setStep("failed");
-          setToast({
-            title:
-              failure === "cancelled"
-                ? "Payment cancelled"
-                : "Payment wasn’t completed",
-            description: "Your reserved stock has been released.",
-          });
-          return;
+        if (applySnapshot(snapshot)) return;
+        if (snapshot.payment.status === "PENDING") {
+          snapshot = await responseData<OrderSnapshot>(
+            await fetch("/api/v1/payments/mpesa/status", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                orderNumber: checkoutSession.orderNumber,
+                accessToken: checkoutSession.accessToken,
+              }),
+              cache: "no-store",
+            }),
+          );
+          if (cancelled || applySnapshot(snapshot)) return;
         }
       } catch (error) {
         if (!cancelled)
@@ -575,13 +608,38 @@ export default function CheckoutExperience() {
                 : "We’ll try again shortly.",
           });
       }
-      if (!cancelled) timeout = window.setTimeout(poll, 2500);
+      if (!cancelled) {
+        timeout = window.setTimeout(poll, 15_000);
+      }
     };
-    void poll();
+    const initiatedAt = checkoutSession.paymentInitiatedAt
+      ? new Date(checkoutSession.paymentInitiatedAt).getTime()
+      : Date.now();
+    const remainingCallbackWait = Math.max(
+      0,
+      30_000 - (Date.now() - initiatedAt),
+    );
+    timeout = window.setTimeout(() => void poll(), remainingCallbackWait);
     return () => {
       cancelled = true;
       if (timeout) window.clearTimeout(timeout);
     };
+  }, [checkoutSession, step]);
+
+  useEffect(() => {
+    if (step !== "waiting") return;
+    const initiatedAt = checkoutSession?.paymentInitiatedAt
+      ? new Date(checkoutSession.paymentInitiatedAt).getTime()
+      : Date.now();
+    const remainingCallbackWait = Math.max(
+      0,
+      30_000 - (Date.now() - initiatedAt),
+    );
+    const timeout = window.setTimeout(
+      () => setIsPaymentStillWaiting(true),
+      remainingCallbackWait,
+    );
+    return () => window.clearTimeout(timeout);
   }, [checkoutSession, step]);
 
   const persistCheckoutSession = (session: CheckoutSession) => {
@@ -596,7 +654,7 @@ export default function CheckoutExperience() {
     setConfirmationCodeError("");
     setIsSendingPayment(true);
     try {
-      const result = await responseData<{ customerMessage?: string }>(
+      await responseData(
         await fetch("/api/v1/payments/mpesa/initiate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -610,12 +668,13 @@ export default function CheckoutExperience() {
       persistCheckoutSession({
         ...checkoutSession,
         paymentInitiated: true,
+        paymentInitiatedAt: new Date().toISOString(),
       });
+      setIsPaymentStillWaiting(false);
       setStep("waiting");
       setToast({
         title: "M-Pesa prompt sent",
-        description:
-          result.customerMessage ?? "Approve the payment prompt on your phone.",
+        description: "Check your phone and approve the prompt. We’ll update this page as soon as Safaricom confirms your action.",
       });
     } catch (error) {
       setToast({
@@ -1203,11 +1262,12 @@ export default function CheckoutExperience() {
                 <span className="size-5 animate-spin rounded-full border-2 border-tipsy-line border-t-tipsy-ink" />
               </span>
               <h1 className="mt-5 text-[30px] font-bold tracking-[-0.05em]">
-                Waiting for confirmation
+                Check your phone
               </h1>
               <p className="mt-3 text-[15px] leading-5 text-tipsy-muted">
-                Approve the M-Pesa prompt on your phone. We’ll update this page
-                when the result arrives.
+                {isPaymentStillWaiting
+                  ? "We haven’t received confirmation yet. If you already approved the prompt, please wait—don’t pay again. We’re still checking."
+                  : "Approve or cancel the M-Pesa request on your phone. We’ll update this page as soon as Safaricom confirms your action."}
               </p>
               <div className="mt-6 grid gap-3">
                 <button
@@ -1723,11 +1783,12 @@ export default function CheckoutExperience() {
                   M-Pesa payment
                 </p>
                 <h1 className="mt-1.5 text-[30px] font-bold tracking-[-0.05em]">
-                  Waiting for confirmation
+                  Check your phone
                 </h1>
                 <p className="mx-auto mt-2 max-w-sm text-sm leading-5 text-tipsy-muted">
-                  Approve the M-Pesa prompt on your phone. This page checks the
-                  verified M-Pesa result automatically and is safe to reopen.
+                  {isPaymentStillWaiting
+                    ? "We haven’t received confirmation yet. If you already approved the prompt, please wait—don’t pay again. We’re still checking."
+                    : "Approve or cancel the M-Pesa request on your phone. This page checks the verified result automatically and is safe to reopen."}
                 </p>
                 {isIssueOpen ? (
                   <form

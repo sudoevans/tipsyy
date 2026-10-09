@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   convertOrderReservations,
   ensureCheckoutCustomerAccount,
+  releaseCouponForOrder,
   releaseOrderReservations,
   RESERVATION_MINUTES,
 } from "./checkout";
@@ -13,6 +14,7 @@ import { ApiError } from "./http";
 import {
   initiateStkPush,
   mpesaCallbackMetadata,
+  queryStkPushStatus,
   type StkCallbackPayload,
 } from "./mpesa";
 import { hashSecret, normalizeKenyanPhone } from "./security";
@@ -59,6 +61,11 @@ export const cancelPaymentSchema = z.object({
   orderNumber: z.string().min(4).max(40),
   accessToken: z.string().min(20).max(200),
   reason: z.literal("CANCELLED").default("CANCELLED"),
+});
+
+export const checkStkStatusSchema = z.object({
+  orderNumber: z.string().min(4).max(40),
+  accessToken: z.string().min(20).max(200),
 });
 
 interface PaymentContext {
@@ -387,6 +394,7 @@ export async function initiateOrderPayment(
       UPDATE payment_attempts
       SET merchant_request_id = ${provider.response.MerchantRequestID ?? null},
           checkout_request_id = ${provider.response.CheckoutRequestID ?? null},
+          initiated_at = now(),
           request_payload = ${sql.json(JSON.parse(JSON.stringify(provider.request)))},
           response_payload = ${sql.json(JSON.parse(JSON.stringify(provider.response)))}
       WHERE id = ${context.attempt.id}
@@ -407,6 +415,178 @@ export async function initiateOrderPayment(
     `;
     throw error;
   }
+}
+
+export async function checkPendingStkStatus(
+  input: z.infer<typeof checkStkStatusSchema>,
+) {
+  const [attempt] = await sql<
+    {
+      attempt_id: string;
+      attempt_status: string;
+      checkout_request_id: string | null;
+      callback_received_at: Date | null;
+      initiated_at: Date;
+      payment_id: string;
+      payment_status: string;
+      order_id: string;
+      order_number: string;
+    }[]
+  >`
+      SELECT pa.id AS attempt_id, pa.status AS attempt_status, pa.checkout_request_id,
+           pa.callback_received_at, pa.initiated_at, p.id AS payment_id, p.status AS payment_status,
+           o.id AS order_id, o.order_number
+    FROM orders o
+    JOIN payments p ON p.order_id = o.id
+    JOIN LATERAL (
+      SELECT id, status, checkout_request_id, initiated_at
+      FROM payment_attempts
+      WHERE payment_id = p.id
+      ORDER BY initiated_at DESC
+      LIMIT 1
+    ) pa ON true
+    WHERE o.order_number = ${input.orderNumber}
+      AND o.access_token_hash = ${hashSecret(input.accessToken)}
+  `;
+  if (!attempt) throw new ApiError(404, "ORDER_NOT_FOUND", "Order not found.");
+  if (attempt.payment_status !== "PENDING" || attempt.attempt_status !== "PENDING") {
+    return { status: attempt.payment_status };
+  }
+  // A callback is authoritative. Never issue an STK status query once it has
+  // arrived, even if another part of callback processing is still underway.
+  if (attempt.callback_received_at) {
+    return { status: attempt.payment_status, retryAfterMs: 5_000 };
+  }
+  if (!attempt.checkout_request_id) {
+    return { status: "PENDING" as const, retryAfterMs: 5_000 };
+  }
+
+  const queryAt = Date.now();
+  const initiatedAt = new Date(attempt.initiated_at).getTime();
+  if (queryAt - initiatedAt < 30_000) {
+    return {
+      status: "PENDING" as const,
+      retryAfterMs: Math.max(1_000, 30_000 - (queryAt - initiatedAt)),
+    };
+  }
+
+  const provider = await queryStkPushStatus(attempt.checkout_request_id);
+  const rawResultCode = provider.response.ResultCode;
+  const resultCode =
+    rawResultCode === undefined || rawResultCode === null || rawResultCode === ""
+      ? null
+      : Number(rawResultCode);
+  const resultDescription =
+    provider.response.ResultDesc ??
+    provider.response.ResponseDescription ??
+    "M-Pesa has not returned a final payment result yet.";
+  const queryPayload = {
+    ...provider.response,
+    checkedAt: new Date().toISOString(),
+  };
+
+  return withTransaction(async (tx) => {
+    const [current] = await tx<
+      {
+        attempt_status: string;
+        checkout_request_id: string | null;
+        payment_id: string;
+        payment_status: string;
+        order_id: string;
+        order_number: string;
+        order_status: string;
+        amount_minor: number;
+        customer_phone: string;
+        user_id: string | null;
+      }[]
+    >`
+      SELECT pa.status AS attempt_status, pa.checkout_request_id,
+             p.id AS payment_id, p.status AS payment_status, o.id AS order_id,
+             o.order_number, o.status AS order_status, p.amount_minor,
+             o.customer_phone, o.user_id
+      FROM payment_attempts pa
+      JOIN payments p ON p.id = pa.payment_id
+      JOIN orders o ON o.id = p.order_id
+      WHERE pa.id = ${attempt.attempt_id}
+      FOR UPDATE OF pa, p, o
+    `;
+    if (!current) throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "Payment attempt not found.");
+    await tx`
+      UPDATE payment_attempts
+      SET response_payload = COALESCE(response_payload, '{}'::jsonb) || ${tx.json({ statusQuery: queryPayload })}
+      WHERE id = ${attempt.attempt_id}
+    `;
+    if (
+      current.payment_status !== "PENDING" ||
+      current.attempt_status !== "PENDING" ||
+      current.checkout_request_id !== attempt.checkout_request_id
+    ) {
+      return { status: current.payment_status };
+    }
+    if (resultCode === null || !Number.isFinite(resultCode)) {
+      return { status: "PENDING" as const, retryAfterMs: 15_000 };
+    }
+    // Daraja can accept the status-query request without returning a final
+    // result yet. That is not a failed customer payment; keep the order pending.
+    if (
+      (provider.response.ResponseCode !== undefined &&
+        provider.response.ResponseCode !== "0") ||
+      resultCode === 499 ||
+      resultCode === 4999
+    ) {
+      return { status: "PENDING" as const, retryAfterMs: 15_000 };
+    }
+    if (resultCode === 0) {
+      const note = "STK status query confirmed payment, but the callback receipt details have not arrived.";
+      await tx`
+        UPDATE payment_attempts
+        SET result_code = '0', result_description = ${note}
+        WHERE id = ${attempt.attempt_id} AND status = 'PENDING'
+      `;
+      await tx`
+        UPDATE payments SET status = 'RECONCILING', raw_result = ${tx.json(queryPayload)}, updated_at = now()
+        WHERE id = ${current.payment_id} AND status = 'PENDING'
+      `;
+      await publishAdminNotification(tx, {
+        eventType: "MPESA_QUERY_CONFIRMED_WITHOUT_CALLBACK",
+        entityType: "payment_attempt",
+        entityId: attempt.attempt_id,
+        severity: "CRITICAL",
+        title: "M-Pesa payment confirmed; receipt callback missing",
+        body: `${current.order_number} was reported paid by an STK status query, but callback receipt details are still missing. Verify before fulfilment.`,
+        href: "/admin/transactions",
+      });
+      return { status: "RECONCILING" as const, retryAfterMs: 15_000 };
+    }
+
+    const resultStatus = callbackPaymentStatus(resultCode);
+    const orderStatus = failureOrderStatus(resultCode);
+    await releaseOrderReservations(tx, current.order_id);
+    await releaseCouponForOrder(tx, current.order_id);
+    await tx`
+      UPDATE payment_attempts
+      SET status = ${resultStatus}, result_code = ${String(resultCode)},
+          result_description = ${resultDescription}, completed_at = now()
+      WHERE id = ${attempt.attempt_id} AND status = 'PENDING'
+    `;
+    await tx`
+      UPDATE payments SET status = ${resultStatus}, raw_result = ${tx.json(queryPayload)}, updated_at = now()
+      WHERE id = ${current.payment_id} AND status = 'PENDING'
+    `;
+    await tx`
+      UPDATE orders SET status = ${orderStatus}, cancelled_at = now(), updated_at = now()
+      WHERE id = ${current.order_id} AND status = 'PENDING_PAYMENT'
+    `;
+    await tx`
+      INSERT INTO order_events (order_id, from_status, to_status, source, note, metadata)
+      VALUES (${current.order_id}, ${current.order_status}, ${orderStatus}, 'mpesa-stk-query', ${resultDescription}, ${tx.json({ resultCode })})
+    `;
+    await tx`
+      INSERT INTO notifications (user_id, order_id, channel, event_type, destination, subject, body)
+      VALUES (${current.user_id}, ${current.order_id}, 'SMS', 'PAYMENT_FAILED', ${current.customer_phone}, 'Payment not completed', ${resultDescription})
+    `;
+    return { status: resultStatus };
+  });
 }
 
 export async function cancelPendingOrderPayment(
@@ -646,7 +826,8 @@ export async function processMpesaCallback(payload: StkCallbackPayload) {
       await releaseOrderReservations(tx, attempt.order_id);
       await tx`
         UPDATE payment_attempts SET callback_payload = ${tx.json(serializedPayload)}, status = ${resultStatus},
-          result_code = ${String(resultCode)}, result_description = ${resultDescription}, completed_at = now()
+          result_code = ${String(resultCode)}, result_description = ${resultDescription},
+          callback_received_at = now(), completed_at = now()
         WHERE id = ${attempt.attempt_id}
       `;
       await tx`UPDATE payments SET status = ${resultStatus}, raw_result = ${tx.json(serializedPayload)}, updated_at = now() WHERE id = ${attempt.payment_id}`;

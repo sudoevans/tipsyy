@@ -19,6 +19,17 @@ export interface StkPushResponse {
   requestId?: string;
 }
 
+export interface StkPushQueryResponse {
+  CheckoutRequestID?: string;
+  MerchantRequestID?: string;
+  ResponseCode?: string;
+  ResponseDescription?: string;
+  ResultCode?: string | number;
+  ResultDesc?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
 export interface StkCallbackItem {
   Name: string;
   Value?: string | number;
@@ -116,6 +127,39 @@ export async function initiateStkPush(input: {
     });
   }
   return { request: { ...request, Password: "[REDACTED]" }, response: payload };
+}
+
+export async function queryStkPushStatus(checkoutRequestId: string) {
+  const config = requireMpesaConfig();
+  const accessToken = await getMpesaAccessToken();
+  const timestamp = darajaTimestamp();
+  const password = Buffer.from(
+    `${config.shortcode}${config.passkey}${timestamp}`,
+  ).toString("base64");
+  const request = {
+    BusinessShortCode: config.shortcode,
+    Password: password,
+    Timestamp: timestamp,
+    CheckoutRequestID: checkoutRequestId,
+  };
+  const response = await fetch(
+    `${apiBase(config.environment)}/mpesa/stkpushquery/v1/query`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    },
+  );
+  const payload = await parseDarajaResponse<StkPushQueryResponse>(response);
+  return {
+    request: { ...request, Password: "[REDACTED]" },
+    response: payload,
+  };
 }
 
 export function mpesaCallbackMetadata(payload: StkCallbackPayload) {
