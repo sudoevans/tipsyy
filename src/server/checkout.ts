@@ -71,7 +71,7 @@ interface CouponRow {
   minimum_order_minor: number;
 }
 
-const RESERVATION_MINUTES = 10;
+export const RESERVATION_MINUTES = 10;
 
 /**
  * Guest checkout begins a customer record early, so incomplete payments are
@@ -208,6 +208,14 @@ export async function releaseExpiredReservations(tx: Transaction) {
   }
 
   for (const orderId of orderIds) {
+    const [prompt] = await tx<{ sent: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM payment_attempts pa
+        JOIN payments p ON p.id = pa.payment_id
+        WHERE p.order_id = ${orderId} AND pa.checkout_request_id IS NOT NULL
+      ) AS sent
+    `;
+    const promptWasSent = prompt?.sent ?? false;
     const [order] = await tx<{ status: string }[]>`
       UPDATE orders
       SET status = 'PAYMENT_CANCELLED', cancelled_at = now(), updated_at = now()
@@ -215,15 +223,30 @@ export async function releaseExpiredReservations(tx: Transaction) {
       RETURNING status
     `;
     if (!order) continue;
-    await tx`UPDATE payments SET status = 'TIMED_OUT', updated_at = now() WHERE order_id = ${orderId} AND status = 'PENDING'`;
     await tx`
-      UPDATE payment_attempts pa SET status = 'TIMED_OUT', completed_at = now()
-      FROM payments p WHERE pa.payment_id = p.id AND p.order_id = ${orderId} AND pa.status = 'PENDING'
+      UPDATE payments SET status = ${promptWasSent ? "TIMED_OUT" : "CANCELLED"}, updated_at = now()
+      WHERE order_id = ${orderId} AND status = 'PENDING'
+    `;
+    await tx`
+      UPDATE payment_attempts pa
+      SET status = CASE WHEN pa.checkout_request_id IS NOT NULL THEN 'TIMED_OUT' ELSE 'FAILED' END,
+          result_description = CASE
+            WHEN pa.checkout_request_id IS NOT NULL THEN 'M-Pesa prompt expired before a payment result was received.'
+            ELSE 'The checkout reservation expired before an M-Pesa prompt was sent.'
+          END,
+          completed_at = now()
+      FROM payments p
+      WHERE pa.payment_id = p.id AND p.order_id = ${orderId} AND pa.status = 'PENDING'
     `;
     await releaseCouponForOrder(tx, orderId);
     await tx`
       INSERT INTO order_events (order_id, from_status, to_status, source, note)
-      VALUES (${orderId}, 'PENDING_PAYMENT', 'PAYMENT_CANCELLED', 'reservation-expiry', 'Stock reservation expired before payment completed.')
+      VALUES (
+        ${orderId}, 'PENDING_PAYMENT', 'PAYMENT_CANCELLED', 'reservation-expiry',
+        ${promptWasSent
+          ? "Stock reservation expired after an M-Pesa prompt was sent without a final payment result."
+          : "Stock reservation expired before an M-Pesa prompt was sent."}
+      )
     `;
   }
   if (orderIds.size) await evaluateInventoryNotifications(tx);

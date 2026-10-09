@@ -23,6 +23,7 @@ export async function getGuestOrder(orderNumber: string, accessToken: string) {
     estimated_min_minutes: number | null;
     estimated_max_minutes: number | null;
     payment_status: string;
+    payment_prompt_sent: boolean;
     provider_receipt: string | null;
     payment_paid_at: Date | null;
   }[]>`
@@ -30,7 +31,11 @@ export async function getGuestOrder(orderNumber: string, accessToken: string) {
            o.delivery_instructions, o.currency, o.subtotal_minor, o.discount_minor,
            o.delivery_fee_minor, o.total_minor, o.reservation_expires_at, o.paid_at,
            o.confirmed_at, o.created_at, da.estimated_min_minutes, da.estimated_max_minutes,
-           p.status AS payment_status, p.provider_receipt, p.paid_at AS payment_paid_at
+           p.status AS payment_status, p.provider_receipt, p.paid_at AS payment_paid_at,
+           EXISTS (
+             SELECT 1 FROM payment_attempts pa
+             WHERE pa.payment_id = p.id AND pa.checkout_request_id IS NOT NULL
+           ) AS payment_prompt_sent
     FROM orders o
     LEFT JOIN delivery_areas da ON da.id = o.delivery_area_id
     LEFT JOIN LATERAL (
@@ -69,6 +74,7 @@ export async function getGuestOrder(orderNumber: string, accessToken: string) {
     },
     payment: {
       status: order.payment_status,
+      promptSent: order.payment_prompt_sent,
       receipt: order.provider_receipt,
       paidAt: order.payment_paid_at,
     },

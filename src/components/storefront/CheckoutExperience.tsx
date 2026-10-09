@@ -26,7 +26,11 @@ type CheckoutStep =
   "details" | "payment" | "waiting" | "failed" | "complete" | "tracking";
 type MobileCheckoutView = "details" | "summary";
 type CheckoutToast = { description?: string; title: string };
-type PaymentFailureKind = "cancelled" | "timed_out" | "failed";
+type PaymentFailureKind =
+  | "cancelled"
+  | "expired_before_prompt"
+  | "timed_out"
+  | "failed";
 interface PaymentReceipt {
   code: string;
   paidAt: string;
@@ -52,13 +56,17 @@ interface CheckoutSession {
   subtotal: number;
   total: number;
   items?: CheckoutLineItem[];
-  paymentInitiatedAt?: string;
 }
 
 interface OrderSnapshot {
   orderNumber: string;
   status: string;
-  payment: { status: string; receipt: string | null; paidAt: string | null };
+  payment: {
+    status: string;
+    promptSent: boolean;
+    receipt: string | null;
+    paidAt: string | null;
+  };
   totals: {
     subtotal: number;
     discount: number;
@@ -68,14 +76,12 @@ interface OrderSnapshot {
   reservationExpiresAt?: string | null;
 }
 
-function paymentFailureKind(
-  snapshot: Pick<OrderSnapshot, "status" | "payment">,
-): PaymentFailureKind | null {
+function paymentFailureKind(snapshot: OrderSnapshot): PaymentFailureKind | null {
   if (
     snapshot.payment.status === "CANCELLED" ||
     snapshot.status === "PAYMENT_CANCELLED"
   )
-    return "cancelled";
+    return snapshot.payment.promptSent ? "cancelled" : "expired_before_prompt";
   if (snapshot.payment.status === "TIMED_OUT") return "timed_out";
   if (
     snapshot.payment.status === "FAILED" ||
@@ -462,6 +468,12 @@ export default function CheckoutExperience() {
           description:
             "You cancelled the M-Pesa prompt. Nothing has been charged.",
         }
+      : paymentFailure === "expired_before_prompt"
+        ? {
+            title: "Checkout expired",
+            description:
+              "Your stock hold expired before an M-Pesa prompt was sent. Nothing was charged. Start a new checkout.",
+          }
       : paymentFailure === "timed_out"
         ? {
             title: "Payment timed out",
@@ -505,42 +517,6 @@ export default function CheckoutExperience() {
     if (step !== "waiting" || !checkoutSession) return;
     let cancelled = false;
     let timeout: number | undefined;
-    const initiatedAt = checkoutSession.paymentInitiatedAt
-      ? new Date(checkoutSession.paymentInitiatedAt).getTime()
-      : Date.now();
-    const remainingPromptTime = Math.max(
-      0,
-      30_000 - (Date.now() - initiatedAt),
-    );
-    const inactivityTimeout = window.setTimeout(() => {
-      if (cancelled) return;
-      void (async () => {
-        try {
-          await responseData(
-            await fetch("/api/v1/payments/mpesa/cancel", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                orderNumber: checkoutSession.orderNumber,
-                accessToken: checkoutSession.accessToken,
-                reason: "TIMED_OUT",
-              }),
-            }),
-          );
-          if (cancelled) return;
-          setPaymentFailure("timed_out");
-          setStep("failed");
-          setToast({
-            title: "Payment timed out",
-            description:
-              "The M-Pesa prompt expired after 30 seconds of inactivity.",
-          });
-        } catch {
-          // A callback may have settled the payment at the same time; the next
-          // status poll is the source of truth in that race.
-        }
-      })();
-    }, remainingPromptTime);
     const poll = async () => {
       try {
         const snapshot = await responseData<OrderSnapshot>(
@@ -605,7 +581,6 @@ export default function CheckoutExperience() {
     return () => {
       cancelled = true;
       if (timeout) window.clearTimeout(timeout);
-      window.clearTimeout(inactivityTimeout);
     };
   }, [checkoutSession, step]);
 
@@ -635,7 +610,6 @@ export default function CheckoutExperience() {
       persistCheckoutSession({
         ...checkoutSession,
         paymentInitiated: true,
-        paymentInitiatedAt: new Date().toISOString(),
       });
       setStep("waiting");
       setToast({
@@ -655,7 +629,7 @@ export default function CheckoutExperience() {
   };
 
   const cancelPendingPayment = async (
-    reason: "CANCELLED" | "TIMED_OUT" = "CANCELLED",
+    reason: "CANCELLED" = "CANCELLED",
   ) => {
     if (!checkoutSession || isCancellingPayment) return;
     setIsCancellingPayment(true);
@@ -671,15 +645,11 @@ export default function CheckoutExperience() {
           }),
         }),
       );
-      setPaymentFailure(reason === "TIMED_OUT" ? "timed_out" : "cancelled");
+      setPaymentFailure("cancelled");
       setStep("failed");
       setToast({
-        title:
-          reason === "TIMED_OUT" ? "Payment timed out" : "Payment cancelled",
-        description:
-          reason === "TIMED_OUT"
-            ? "The M-Pesa prompt expired after 30 seconds of inactivity."
-            : "Your M-Pesa payment was cancelled and the stock has been released.",
+        title: "Payment cancelled",
+        description: "Your M-Pesa payment was cancelled and the stock has been released.",
       });
     } catch (error) {
       setToast({

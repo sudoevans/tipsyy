@@ -4,6 +4,7 @@ import {
   convertOrderReservations,
   ensureCheckoutCustomerAccount,
   releaseOrderReservations,
+  RESERVATION_MINUTES,
 } from "./checkout";
 import { evaluateInventoryNotifications, publishAdminNotification, resolveAdminNotification } from "./admin-notifications";
 import { enqueueTelegramAlert } from "./notifications";
@@ -57,7 +58,7 @@ export const confirmPaymentInvestigationSchema = z.object({
 export const cancelPaymentSchema = z.object({
   orderNumber: z.string().min(4).max(40),
   accessToken: z.string().min(20).max(200),
-  reason: z.enum(["CANCELLED", "TIMED_OUT"]).default("CANCELLED"),
+  reason: z.literal("CANCELLED").default("CANCELLED"),
 });
 
 interface PaymentContext {
@@ -354,6 +355,17 @@ export async function initiateOrderPayment(
       VALUES (${payment.payment_id}, ${input.idempotencyKey}, ${hashSecret(`${payment.order_id}:${payment.customer_phone}:${payment.amount_minor}`)}, ${tx.json({ orderNumber: input.orderNumber, phone: payment.customer_phone, amount: payment.amount_minor })})
       RETURNING id, status, checkout_request_id, merchant_request_id
     `;
+    const reservationExpiresAt = new Date(
+      Date.now() + RESERVATION_MINUTES * 60_000,
+    );
+    await tx`
+      UPDATE orders SET reservation_expires_at = ${reservationExpiresAt}, updated_at = now()
+      WHERE id = ${payment.order_id} AND status = 'PENDING_PAYMENT'
+    `;
+    await tx`
+      UPDATE inventory_reservations SET expires_at = ${reservationExpiresAt}
+      WHERE order_id = ${payment.order_id} AND status = 'ACTIVE'
+    `;
     return { payment, attempt, existing: false };
   });
 
@@ -436,10 +448,7 @@ export async function cancelPendingOrderPayment(
       payment.payment_status === "PENDING"
     ) {
       await releaseOrderReservations(tx, payment.order_id);
-      const note =
-        input.reason === "TIMED_OUT"
-          ? "M-Pesa prompt timed out after 30 seconds of inactivity."
-          : "Customer cancelled the pending M-Pesa payment.";
+      const note = "Customer cancelled the pending M-Pesa payment.";
       await tx`
         UPDATE payment_attempts
         SET status = ${input.reason}, completed_at = now(), result_description = ${note}
@@ -452,7 +461,7 @@ export async function cancelPendingOrderPayment(
       `;
       await tx`
         INSERT INTO order_events (order_id, from_status, to_status, source, note)
-        VALUES (${payment.order_id}, 'PENDING_PAYMENT', 'PAYMENT_CANCELLED', ${input.reason === "TIMED_OUT" ? "mpesa-timeout" : "customer-cancelled"}, ${note})
+        VALUES (${payment.order_id}, 'PENDING_PAYMENT', 'PAYMENT_CANCELLED', 'customer-cancelled', ${note})
       `;
     }
     return { status: "CANCELLED" as const };
