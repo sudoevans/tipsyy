@@ -4,6 +4,7 @@ import generatedWorker from "../.open-next/worker.js";
 type WorkerEnvironment = {
   APP_URL?: string;
   INTERNAL_JOB_SECRET?: string;
+  HYPERDRIVE?: { connectionString: string };
 };
 
 type WorkerContext = {
@@ -15,6 +16,16 @@ type GeneratedWorker = {
 };
 
 const app = generatedWorker as GeneratedWorker;
+
+function setRuntimeBindings(env: WorkerEnvironment) {
+  (globalThis as typeof globalThis & { tipsyHyperdriveConnectionString?: string }).tipsyHyperdriveConnectionString =
+    env.HYPERDRIVE?.connectionString;
+}
+
+function fetch(request: Request, env: WorkerEnvironment, context: WorkerContext) {
+  setRuntimeBindings(env);
+  return app.fetch(request, env, context);
+}
 
 async function runMaintenance(env: WorkerEnvironment, context: WorkerContext) {
   if (!env.APP_URL || !env.INTERNAL_JOB_SECRET) {
@@ -37,8 +48,9 @@ async function runMaintenance(env: WorkerEnvironment, context: WorkerContext) {
 }
 
 const worker = {
-  fetch: app.fetch,
+  fetch,
   scheduled(_controller: unknown, env: WorkerEnvironment, context: WorkerContext) {
+    setRuntimeBindings(env);
     context.waitUntil(runMaintenance(env, context));
   },
 };

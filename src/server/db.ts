@@ -14,6 +14,10 @@ type HyperdriveEnvironment = {
 };
 
 function getDatabaseUrl() {
+  const workerConnection = (globalThis as typeof globalThis & {
+    tipsyHyperdriveConnectionString?: string;
+  }).tipsyHyperdriveConnectionString;
+  if (workerConnection) return workerConnection;
   try {
     const context = getCloudflareContext();
     const hyperdrive = (context.env as typeof context.env & HyperdriveEnvironment).HYPERDRIVE;
