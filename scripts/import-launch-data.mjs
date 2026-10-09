@@ -245,6 +245,12 @@ const result = await sql.begin(async (tx) => {
     }
   }
 
+  const importedSkus = [...groupedProducts.values()].map((product) => `TT-PROD-${product.slug.toUpperCase()}`);
+  await tx`
+    DELETE FROM products
+    WHERE sku LIKE 'TT-PROD-%' AND NOT (sku = ANY(${tx.array(importedSkus)}))
+  `;
+
   for (const driver of drivers) {
     const [user] = await tx`
       INSERT INTO users (phone, display_name, role, status, phone_verified_at)
