@@ -16,6 +16,7 @@ type SettingsValue = {
   closingSoonMinutes?: number;
   chatId?: string;
   events?: Record<string, boolean>;
+  botTokenEncrypted?: string;
 };
 
 export default async function SettingsPage() {
@@ -56,7 +57,7 @@ export default async function SettingsPage() {
       <TelegramNotificationSettings
         chatId={telegram?.chatId ?? ""}
         events={telegram?.events ?? {}}
-        tokenConfigured={Boolean(env.TELEGRAM_BOT_TOKEN)}
+        tokenConfigured={Boolean(telegram?.botTokenEncrypted || env.TELEGRAM_BOT_TOKEN)}
       />
     </div>
   );

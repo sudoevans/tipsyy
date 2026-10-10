@@ -10,6 +10,8 @@ import { evaluateInventoryNotifications } from "@/server/admin-notifications";
 import { hashPassword } from "@/server/admin-auth";
 import { redirect } from "next/navigation";
 import { sendTelegramMessage, TELEGRAM_EVENTS } from "@/server/notifications";
+import { encryptPlatformSecret } from "@/server/security";
+import { getServerEnv } from "@/server/env";
 
 async function requireAdministrator() {
   const cookieStore = await cookies();
@@ -273,10 +275,22 @@ export async function saveTelegramNotificationSettings(formData: FormData) {
   const admin = await requireAdministrator();
   const chatId = text(formData, "chatId");
   if (!/^-?\d{5,20}$/.test(chatId)) throw new Error("Enter a valid Telegram group or chat ID.");
+  const botToken = text(formData, "botToken");
+  if (botToken.length > 256) throw new Error("Telegram bot token is too long.");
   const selected = new Set(formData.getAll("events").map(String));
   const events = Object.fromEntries(TELEGRAM_EVENTS.map((event) => [event, selected.has(event)]));
-  await sql`INSERT INTO platform_settings(key,value,description,updated_by) VALUES('notifications.telegram',${sql.json({ chatId, events })},'Telegram operations-chat destination and selected alert types.',${admin.id}) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_by=EXCLUDED.updated_by,updated_at=now()`;
-  await audit(admin.id, "settings.telegram_notifications_updated", "platform_settings", "notifications.telegram", { enabledEvents: [...selected] });
+  const [existing] = await sql<{ value: { botTokenEncrypted?: string } }[]>`
+    SELECT value FROM platform_settings WHERE key='notifications.telegram'
+  `;
+  const legacyToken = !botToken && !existing?.value?.botTokenEncrypted
+    ? getServerEnv().TELEGRAM_BOT_TOKEN
+    : undefined;
+  const botTokenEncrypted = botToken
+    ? encryptPlatformSecret(botToken)
+    : existing?.value?.botTokenEncrypted ?? (legacyToken ? encryptPlatformSecret(legacyToken) : undefined);
+  if (!botTokenEncrypted) throw new Error("Enter the Telegram bot token to configure notifications.");
+  await sql`INSERT INTO platform_settings(key,value,description,updated_by) VALUES('notifications.telegram',${sql.json({ chatId, events, botTokenEncrypted })},'Encrypted Telegram bot credential, operations-chat destination, and selected alert types.',${admin.id}) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_by=EXCLUDED.updated_by,updated_at=now()`;
+  await audit(admin.id, "settings.telegram_notifications_updated", "platform_settings", "notifications.telegram", { enabledEvents: [...selected], botTokenUpdated: Boolean(botToken) });
   revalidatePath("/admin/settings");
 }
 
