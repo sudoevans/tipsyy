@@ -19,7 +19,8 @@ type RiderOption = { id: string; name: string; phone: string; busy: boolean };
 
 export default function AdminOrderActions({ orderNumber, status, riders, paymentStatus, paymentAmountMinor, refundedMinor }: { orderNumber: string; status: string; riders: RiderOption[]; paymentStatus: string | null; paymentAmountMinor: number; refundedMinor: number }) {
   const [busy, setBusy] = useState(false);
-  const [currentStatus, setCurrentStatus] = useState(status);
+  const [optimisticStatus, setOptimisticStatus] = useState<{ status: string; baseStatus: string } | null>(null);
+  const currentStatus = optimisticStatus?.baseStatus === status ? optimisticStatus.status : status;
   const requestInFlight = useRef(false);
   const [riderId, setRiderId] = useState(riders.find((rider) => !rider.busy)?.id ?? "");
   const [assignOpen, setAssignOpen] = useState(false);
@@ -48,8 +49,14 @@ export default function AdminOrderActions({ orderNumber, status, riders, payment
     setBusy(true); setError("");
     try {
       const response = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? "The order could not be updated.");
+      const payload = await response.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
+      if (!response.ok) {
+        // Another actor (for example, the assigned rider) may have advanced
+        // the order while this screen was open. Refresh even on conflict so
+        // the stale action is replaced by the committed server state.
+        router.refresh();
+        throw new Error(payload?.error?.message ?? "The order could not be updated.");
+      }
       router.refresh();
       return true;
     } catch (cause) { setError(cause instanceof Error ? cause.message : "The order could not be updated."); }
@@ -57,7 +64,7 @@ export default function AdminOrderActions({ orderNumber, status, riders, payment
     return false;
   };
 
-  if (status === "READY_FOR_PICKUP") return (
+  if (currentStatus === "READY_FOR_PICKUP") return (
     <div className="w-full min-w-0 sm:min-w-48">
       <Button className="w-full justify-center sm:w-auto" disabled={busy || !riders.length} onClick={() => { setRiderQuery(""); setAssignOpen(true); }} size="sm" variant="outline">
         {selectedRider && !selectedRider.busy ? `Assign · ${selectedRider.name}` : "Choose rider"}
@@ -130,6 +137,7 @@ export default function AdminOrderActions({ orderNumber, status, riders, payment
                     onClick={async () => {
                       const assigned = await request(`/api/v1/admin/orders/${encodeURIComponent(orderNumber)}/assign`, "POST", { riderId });
                       if (assigned) {
+                        setOptimisticStatus({ status: "RIDER_ASSIGNED", baseStatus: status });
                         setAssignOpen(false);
                         showToast({ title: "Rider assigned", description: `${selectedRider?.name} assigned to ${orderNumber}.`, tone: "success" });
                       }
@@ -150,16 +158,20 @@ export default function AdminOrderActions({ orderNumber, status, riders, payment
   const next = currentStatus === "RIDER_ASSIGNED"
     ? { status: "PICKED_UP", label: "Mark picked up" }
     : nextStatus[currentStatus];
+  if (currentStatus === "DELIVERED") {
+    return <span className="inline-flex items-center rounded-full bg-success-50 px-2.5 py-1 text-xs font-semibold text-success-700 dark:bg-success-500/10 dark:text-success-400">Delivered</span>;
+  }
   const canCancel = ["CONFIRMED", "PREPARING", "RIDER_ASSIGNED"].includes(currentStatus);
   const refundable = paymentStatus === "SUCCEEDED" && paymentAmountMinor > refundedMinor;
   if (!next && !canCancel && !refundable) return <span className="text-xs text-gray-400">No action required</span>;
   const changeStatus = async (nextStatusValue: string) => {
     if (nextStatusValue === "PICKED_UP") {
-      await request(`/api/v1/admin/orders/${encodeURIComponent(orderNumber)}/pickup`, "POST", {});
+      const pickedUp = await request(`/api/v1/admin/orders/${encodeURIComponent(orderNumber)}/pickup`, "POST", {});
+      if (pickedUp) setOptimisticStatus({ status: "PICKED_UP", baseStatus: status });
       return;
     }
     const saved = await request(`/api/v1/admin/orders/${encodeURIComponent(orderNumber)}/status`, "PATCH", { status: nextStatusValue });
-    if (saved) setCurrentStatus(nextStatusValue);
+    if (saved) setOptimisticStatus({ status: nextStatusValue, baseStatus: status });
   };
   const recordRefund = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
