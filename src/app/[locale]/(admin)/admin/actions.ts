@@ -271,6 +271,21 @@ export async function saveOperationsSettings(formData: FormData) {
   revalidatePath("/admin/inventory");
 }
 
+export async function saveWhatsAppSupportNumber(formData: FormData) {
+  const admin = await requireAdministrator();
+  const rawNumber = text(formData, "supportNumber");
+  const number = rawNumber.replace(/[\s()+.-]/g, "");
+  if (number && !/^\d{10,15}$/.test(number)) {
+    throw new Error("Enter a WhatsApp number with country code, using 10 to 15 digits.");
+  }
+
+  await sql`INSERT INTO platform_settings (key,value,description,updated_by)
+    VALUES ('support.whatsapp',${sql.json({ number })},'Public WhatsApp support contact used by the storefront.',${admin.id})
+    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_by=EXCLUDED.updated_by,updated_at=now()`;
+  await audit(admin.id, "settings.whatsapp_support_updated", "platform_settings", "support.whatsapp", { configured: Boolean(number) });
+  revalidatePath("/admin/settings");
+}
+
 export async function saveTelegramNotificationSettings(formData: FormData) {
   const admin = await requireAdministrator();
   const chatId = text(formData, "chatId");
