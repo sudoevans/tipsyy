@@ -184,7 +184,7 @@ export default function InventoryCatalog({
             ) : null}
           </div>
         </div>
-        <div className="overflow-x-auto">
+        <div className="hidden overflow-x-auto lg:block">
           <table className="w-full min-w-[1160px] text-left text-sm text-gray-700 dark:text-gray-300">
             <thead className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
               <tr>
@@ -250,6 +250,45 @@ export default function InventoryCatalog({
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="space-y-3 p-3 lg:hidden">
+          {items.map((item) => (
+            <article key={item.variantId} className="rounded-xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="truncate text-base font-semibold text-gray-800 dark:text-white">{item.name}</h2>
+                  <p className="mt-0.5 truncate text-sm text-gray-600 dark:text-gray-300">{item.label}</p>
+                </div>
+                <HealthBadge item={item} />
+              </div>
+              <p className="mt-2 truncate font-mono text-xs text-gray-500 dark:text-gray-400">{item.sku}</p>
+              <dl className="mt-4 grid grid-cols-3 divide-x divide-gray-100 rounded-lg bg-gray-50 px-2 py-3 text-center dark:divide-gray-800 dark:bg-white/[0.03]">
+                <div><dt className="text-[11px] text-gray-500 dark:text-gray-400">Reserved</dt><dd className="mt-1 text-sm font-semibold text-gray-700 dark:text-gray-200">{item.reserved}</dd></div>
+                <div><dt className="text-[11px] text-gray-500 dark:text-gray-400">In stock</dt><dd className="mt-1 text-sm font-semibold text-gray-800 dark:text-white">{item.inStock}</dd></div>
+                <div><dt className="text-[11px] text-gray-500 dark:text-gray-400">Available</dt><dd className="mt-1 text-sm font-semibold text-gray-700 dark:text-gray-200">{item.available}</dd></div>
+              </dl>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <span className="text-xs text-gray-500 dark:text-gray-400">Storefront: <span className="font-medium text-gray-700 dark:text-gray-200">{item.storefrontEnabled ? "Visible" : "Hidden"}</span></span>
+                <InventoryActions
+                  item={item}
+                  includeAddStock={false}
+                  onAddStock={() => setAddingStock(item)}
+                  onToggleStorefront={async () => {
+                    try {
+                      await setInventoryStorefrontEnabled(item.variantId, !item.storefrontEnabled);
+                      showToast({ title: item.storefrontEnabled ? "Item hidden from storefront" : "Item visible on storefront", tone: "success" });
+                      router.refresh();
+                    } catch (error) {
+                      showToast({ title: "Could not update storefront visibility", description: error instanceof Error ? error.message : "Please try again.", tone: "error" });
+                    }
+                  }}
+                />
+              </div>
+              <button type="button" onClick={() => setAddingStock(item)} className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-600">
+                <PlusIcon className="size-4" /> Add stock
+              </button>
+            </article>
+          ))}
         </div>
         {!items.length ? (
           <p className="p-14 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -323,10 +362,12 @@ function SortHeader({
 
 function InventoryActions({
   item,
+  includeAddStock = true,
   onAddStock,
   onToggleStorefront,
 }: {
   item: InventoryItem;
+  includeAddStock?: boolean;
   onAddStock: () => void;
   onToggleStorefront: () => void;
 }) {
@@ -335,11 +376,7 @@ function InventoryActions({
       label={`Inventory actions for ${item.name} ${item.label}`}
       width={200}
       items={[
-        {
-          label: "Add stock",
-          icon: <PlusIcon className="size-4" />,
-          onSelect: onAddStock,
-        },
+        ...(includeAddStock ? [{ label: "Add stock", icon: <PlusIcon className="size-4" />, onSelect: onAddStock }] : []),
         { label: item.storefrontEnabled ? "Hide from storefront" : "Show on storefront", onSelect: onToggleStorefront },
         { label: "View product", href: `/admin/products/${item.productId}` },
       ]}
@@ -382,11 +419,11 @@ function AddStockDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="edit-stock-title"
-      className="fixed inset-0 z-[140] flex items-end bg-gray-950/40 sm:items-center sm:justify-center sm:p-6"
+      aria-labelledby="add-stock-title"
+      className="fixed inset-0 z-[140] flex items-end bg-gray-950/40 px-3 pt-3 sm:items-center sm:justify-center sm:p-6"
     >
-      <div className="w-full max-w-md rounded-t-2xl bg-white shadow-theme-xl sm:rounded-2xl dark:bg-gray-900">
-        <div className="flex items-start justify-between border-b border-gray-100 p-5 dark:border-gray-800">
+      <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white shadow-theme-xl sm:rounded-2xl dark:bg-gray-900">
+        <div className="flex items-start justify-between border-b border-gray-100 px-4 py-4 sm:p-5 dark:border-gray-800">
           <div>
             <h2
               id="add-stock-title"
@@ -407,29 +444,31 @@ function AddStockDialog({
             <XCloseIcon className="size-5" />
           </button>
         </div>
-        <div className="p-5">
+        <div className="space-y-4 p-4 sm:p-5">
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            In stock
+            Quantity to add
             <input
               autoFocus
+              inputMode="numeric"
               type="number"
               min={1}
               step={1}
               value={quantity}
               onChange={(event) => setQuantity(event.target.value)}
-              className="field mt-1.5 h-11"
+              className="field mt-1.5 h-12 text-base"
             />
           </label>
-          <p className="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
-            Current in stock: {item.inStock}. After this restock: {item.inStock + (Number(quantity) || 0)}.
-          </p>
+          <div className="grid grid-cols-2 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
+            <div><p className="text-xs text-gray-500 dark:text-gray-400">Current in stock</p><p className="mt-1 text-lg font-semibold text-gray-800 dark:text-white">{item.inStock}</p></div>
+            <div><p className="text-xs text-gray-500 dark:text-gray-400">After restock</p><p className="mt-1 text-lg font-semibold text-brand-600">{item.inStock + (Number(quantity) || 0)}</p></div>
+          </div>
         </div>
-        <div className="flex justify-end gap-2 border-t border-gray-100 p-5 dark:border-gray-800">
+        <div className="flex gap-2 border-t border-gray-100 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:justify-end sm:p-5 dark:border-gray-800">
           <button
             type="button"
             onClick={onClose}
             disabled={pending}
-            className="h-10 px-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-white/5"
+            className="h-11 flex-1 rounded-lg border border-gray-200 px-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 sm:flex-none dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
           >
             Cancel
           </button>
@@ -437,7 +476,7 @@ function AddStockDialog({
             type="button"
             onClick={save}
             disabled={pending || !Number.isInteger(Number(quantity)) || Number(quantity) < 1}
-            className="h-10 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="h-11 flex-1 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white disabled:opacity-50 sm:flex-none"
           >
             {pending ? "Adding…" : "Add stock"}
           </button>

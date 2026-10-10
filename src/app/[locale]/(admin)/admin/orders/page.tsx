@@ -59,7 +59,6 @@ export default async function OrdersPage({
   return (
     <BasicTableOne
       title="Orders"
-      description="Search and manage payment, preparation, assignment, and delivery from one queue."
       actions={<OrderFilters />}
       columns={[
         "Order",

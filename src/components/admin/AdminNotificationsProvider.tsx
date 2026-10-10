@@ -71,16 +71,33 @@ export function AdminNotificationsProvider({
   }, [load, loading, notifications.length, page, total]);
 
   const markRead = useCallback(async (id: string) => {
-    setNotifications((current) => current.map((item) => item.id === id && !item.read_at ? { ...item, read_at: new Date().toISOString() } : item));
-    setSummary((current) => ({ ...current, unread: Math.max(0, current.unread - 1), newOrders: Math.max(0, current.newOrders - (notifications.find((item) => item.id === id)?.event_type === "ORDER_READY" ? 1 : 0)) }));
-    await fetch("/api/v1/admin/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notificationId: id }) });
-  }, [notifications]);
+    const notification = notifications.find((item) => item.id === id);
+    if (!notification || notification.read_at) return;
+    setNotifications((current) => current.map((item) => item.id === id ? { ...item, read_at: new Date().toISOString() } : item));
+    setSummary((current) => ({ ...current, unread: Math.max(0, current.unread - 1), newOrders: Math.max(0, current.newOrders - (notification.event_type === "ORDER_READY" ? 1 : 0)) }));
+    try {
+      const response = await fetch("/api/v1/admin/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notificationId: id }) });
+      const payload = await response.json() as { data?: { read?: boolean } };
+      if (!response.ok || !payload.data?.read) throw new Error("Could not mark notification as read.");
+    } catch (error) {
+      await refresh();
+      throw error;
+    }
+  }, [notifications, refresh]);
 
   const markAllRead = useCallback(async () => {
     setNotifications((current) => current.map((item) => ({ ...item, read_at: item.read_at ?? new Date().toISOString() })));
     setSummary((current) => ({ ...current, unread: 0, newOrders: 0 }));
-    await fetch("/api/v1/admin/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ markAll: true }) });
-  }, []);
+    try {
+      const response = await fetch("/api/v1/admin/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ markAll: true }) });
+      const payload = await response.json() as { data?: { read?: boolean } };
+      if (!response.ok || !payload.data?.read) throw new Error("Could not mark notifications as read.");
+      await refresh();
+    } catch (error) {
+      await refresh();
+      throw error;
+    }
+  }, [refresh]);
 
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => void refresh(), 0);
