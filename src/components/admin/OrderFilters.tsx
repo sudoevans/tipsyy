@@ -14,6 +14,7 @@ const defaultStatusOptions = [
     "PREPARING",
     "READY_FOR_PICKUP",
     "RIDER_ASSIGNED",
+    "PICKED_UP",
     "OUT_FOR_DELIVERY",
     "DELIVERED",
     "PAYMENT_FAILED",

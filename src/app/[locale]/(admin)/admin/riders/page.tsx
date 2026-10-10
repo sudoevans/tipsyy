@@ -106,7 +106,12 @@ export default async function RidersPage({
     [fleetCount],
   ] = await Promise.all([
     sql<DriverRow[]>`
-      SELECT r.id,u.display_name,u.phone,u.status::text AS user_status,r.availability::text,
+      SELECT r.id,u.display_name,u.phone,u.status::text AS user_status,
+             CASE
+               WHEN u.status <> 'ACTIVE' THEN 'OFFLINE'
+               WHEN COUNT(da.id) FILTER (WHERE da.status IN ('ASSIGNED','ACCEPTED','PICKED_UP')) > 0 THEN 'BUSY'
+               ELSE 'AVAILABLE'
+             END AS availability,
              r.vehicle_type,r.vehicle_registration,
              COUNT(da.id) FILTER (WHERE da.status IN ('ASSIGNED','ACCEPTED','PICKED_UP'))::int AS active_deliveries,
              COUNT(da.id)::int AS assignments,

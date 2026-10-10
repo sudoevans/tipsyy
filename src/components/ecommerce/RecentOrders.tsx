@@ -14,7 +14,7 @@ export type RecentOrder = {
 const statusColor = (status: string): "success" | "warning" | "error" | "info" | "light" => {
   if (["DELIVERED", "CONFIRMED"].includes(status)) return "success";
   if (["CANCELLED", "PAYMENT_FAILED"].includes(status)) return "error";
-  if (["OUT_FOR_DELIVERY", "PREPARING"].includes(status)) return "info";
+  if (["PICKED_UP", "OUT_FOR_DELIVERY", "PREPARING"].includes(status)) return "info";
   if (["PENDING_PAYMENT", "PAID"].includes(status)) return "warning";
   return "light";
 };

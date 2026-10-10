@@ -33,14 +33,28 @@ export default async function OrdersPage({
         payment_amount_minor: number;
         refunded_minor: number;
       }[]
-    >`SELECT o.order_number,o.customer_name,o.customer_phone,o.status::text,o.total_minor,o.created_at,p.status::text AS payment_status,COALESCE(p.amount_minor,0)::int AS payment_amount_minor,COALESCE(p.refunded_minor,0)::int AS refunded_minor FROM orders o LEFT JOIN payments p ON p.order_id=o.id WHERE (${q}='' OR o.order_number ILIKE ${`%${q}%`} OR o.customer_name ILIKE ${`%${q}%`} OR o.customer_phone ILIKE ${`%${q}%`}) AND (${status}='all' OR o.status::text=${status}) ORDER BY o.created_at DESC LIMIT 100`,
+    >`SELECT o.order_number,o.customer_name,o.customer_phone,o.status::text,o.total_minor,o.created_at,p.status::text AS payment_status,COALESCE(p.amount_minor,0)::int AS payment_amount_minor,COALESCE(p.refunded_minor,0)::int AS refunded_minor
+       FROM orders o
+       LEFT JOIN payments p ON p.order_id=o.id
+       WHERE (${q}='' OR o.order_number ILIKE ${`%${q}%`} OR o.customer_name ILIKE ${`%${q}%`} OR o.customer_phone ILIKE ${`%${q}%`})
+         AND (${status}='all' OR o.status::text=${status})
+       ORDER BY o.created_at DESC LIMIT 100`,
     sql<
-      { id: string; display_name: string | null; phone: string | null }[]
-    >`SELECT r.id,u.display_name,u.phone FROM riders r JOIN users u ON u.id=r.user_id WHERE u.status='ACTIVE' AND r.availability IN('ONLINE','BUSY') ORDER BY u.display_name NULLS LAST`,
+      { id: string; display_name: string | null; phone: string | null; busy: boolean }[]
+    >`SELECT r.id,u.display_name,u.phone,
+         EXISTS (
+           SELECT 1 FROM delivery_assignments da
+           WHERE da.rider_id = r.id AND da.status IN ('ASSIGNED','ACCEPTED','PICKED_UP')
+         ) AS busy
+       FROM riders r JOIN users u ON u.id=r.user_id
+       WHERE u.status='ACTIVE'
+       ORDER BY busy ASC,u.display_name NULLS LAST`,
   ]);
-  const availableRiders = riders.map((r) => ({
+  const riderOptions = riders.map((r) => ({
     id: r.id,
     name: r.display_name ?? r.phone ?? "Driver",
+    phone: r.phone ?? "",
+    busy: r.busy,
   }));
   return (
     <BasicTableOne
@@ -90,7 +104,7 @@ export default async function OrdersPage({
           key={`${o.order_number}:${o.status}`}
           orderNumber={o.order_number}
           status={o.status}
-          riders={availableRiders}
+          riders={riderOptions}
           paymentStatus={o.payment_status}
           paymentAmountMinor={o.payment_amount_minor}
           refundedMinor={o.refunded_minor}

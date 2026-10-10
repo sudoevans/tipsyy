@@ -9,7 +9,8 @@ const transitions: Record<string, string[]> = {
   CONFIRMED: ["PREPARING", "CANCELLED"],
   PREPARING: ["READY_FOR_PICKUP", "CANCELLED"],
   READY_FOR_PICKUP: ["RIDER_ASSIGNED", "CANCELLED"],
-  RIDER_ASSIGNED: ["OUT_FOR_DELIVERY", "CANCELLED"],
+  RIDER_ASSIGNED: ["CANCELLED"],
+  PICKED_UP: ["OUT_FOR_DELIVERY"],
   OUT_FOR_DELIVERY: ["DELIVERED"],
   PAID: ["CONFIRMED"],
 };
@@ -20,6 +21,7 @@ export const transitionOrderSchema = z.object({
     "PREPARING",
     "READY_FOR_PICKUP",
     "RIDER_ASSIGNED",
+    "PICKED_UP",
     "OUT_FOR_DELIVERY",
     "DELIVERED",
     "CANCELLED",
@@ -98,6 +100,9 @@ export async function transitionOrder(
         SELECT id, rider_id, status
         FROM delivery_assignments
         WHERE order_id = ${order.id}
+          AND status IN ('ASSIGNED', 'ACCEPTED', 'PICKED_UP')
+        ORDER BY assigned_at DESC
+        LIMIT 1
         FOR UPDATE
       `;
 
@@ -109,24 +114,20 @@ export async function transitionOrder(
         );
       }
 
-      if (
-        assignment &&
-        toStatus === "DELIVERED" &&
-        !["ASSIGNED", "ACCEPTED", "PICKED_UP"].includes(assignment.status)
-      ) {
+      if (assignment && toStatus === "OUT_FOR_DELIVERY" && (order.status !== "PICKED_UP" || assignment.status !== "PICKED_UP")) {
         throw new ApiError(
           409,
-          "INVALID_DELIVERY_TRANSITION",
-          "This delivery cannot be marked delivered from its current assignment state.",
+          "DELIVERY_NOT_PICKED_UP",
+          "Mark the order as picked up before sending it out for delivery.",
         );
       }
 
-      if (assignment && toStatus === "OUT_FOR_DELIVERY") {
-        await tx`
-          UPDATE delivery_assignments
-          SET status = 'PICKED_UP', accepted_at = COALESCE(accepted_at, now()), picked_up_at = COALESCE(picked_up_at, now())
-          WHERE id = ${assignment.id} AND status IN ('ASSIGNED', 'ACCEPTED')
-        `;
+      if (assignment && toStatus === "DELIVERED" && assignment.status !== "PICKED_UP") {
+        throw new ApiError(
+          409,
+          "INVALID_DELIVERY_TRANSITION",
+          "Pick up the order before marking it delivered.",
+        );
       }
 
       if (assignment && toStatus === "DELIVERED") {
@@ -232,14 +233,31 @@ export async function assignRider(
         "ORDER_NOT_READY",
         "Only ready orders can be assigned.",
       );
+    // Availability is derived from the active rider account and existing work,
+    // not the driver's manually reported online/offline flag. Lock the rider
+    // row first so concurrent assignments for different orders serialize.
     const [rider] = await tx<{ id: string }[]>`
-      SELECT id FROM riders WHERE id = ${riderId} AND availability = 'ONLINE' FOR UPDATE
+      SELECT r.id FROM riders r
+      JOIN users u ON u.id = r.user_id
+      WHERE r.id = ${riderId} AND u.status = 'ACTIVE'
+      FOR UPDATE OF r
     `;
     if (!rider)
       throw new ApiError(
         409,
         "RIDER_NOT_AVAILABLE",
-        "That rider is not currently available.",
+        "That rider account is not active.",
+      );
+    const [activeAssignment] = await tx<{ id: string }[]>`
+      SELECT id FROM delivery_assignments
+      WHERE rider_id = ${rider.id} AND status IN ('ASSIGNED','ACCEPTED','PICKED_UP')
+      LIMIT 1
+    `;
+    if (activeAssignment)
+      throw new ApiError(
+        409,
+        "RIDER_ALREADY_ASSIGNED",
+        "That rider already has an active delivery.",
       );
     const [assignment] = await tx<{ id: string }[]>`
       INSERT INTO delivery_assignments (order_id, rider_id, payout_minor)
@@ -277,6 +295,54 @@ export async function assignRider(
       riderId,
       status: "ASSIGNED",
     };
+  });
+}
+
+export async function markOrderPickedUp(orderNumber: string, actorUserId: string) {
+  return withTransaction(async (tx) => {
+    const [order] = await tx<{ id: string; status: string; user_id: string | null; customer_phone: string }[]>`
+      SELECT id, status, user_id, customer_phone FROM orders WHERE order_number = ${orderNumber} FOR UPDATE
+    `;
+    if (!order) throw new ApiError(404, "ORDER_NOT_FOUND", "Order not found.");
+    if (order.status === "PICKED_UP") {
+      return { orderNumber, status: "PICKED_UP", unchanged: true };
+    }
+    if (order.status !== "RIDER_ASSIGNED") {
+      throw new ApiError(409, "ORDER_NOT_ASSIGNED", "Assign a rider before marking the order picked up.");
+    }
+    const [assignment] = await tx<{ id: string; rider_id: string; status: string }[]>`
+      SELECT id, rider_id, status FROM delivery_assignments
+      WHERE order_id = ${order.id} AND status IN ('ASSIGNED', 'ACCEPTED', 'PICKED_UP')
+      ORDER BY assigned_at DESC LIMIT 1 FOR UPDATE
+    `;
+    if (!assignment) {
+      throw new ApiError(409, "DELIVERY_ASSIGNMENT_REQUIRED", "Assign a rider before marking the order picked up.");
+    }
+    if (assignment.status !== "PICKED_UP") {
+      await tx`
+        UPDATE delivery_assignments
+        SET status = 'PICKED_UP', accepted_at = COALESCE(accepted_at, now()), picked_up_at = now()
+        WHERE id = ${assignment.id} AND status IN ('ASSIGNED', 'ACCEPTED')
+      `;
+    }
+    await tx`UPDATE orders SET status = 'PICKED_UP'::order_status, updated_at = now() WHERE id = ${order.id}`;
+    await tx`
+      INSERT INTO order_events (order_id, from_status, to_status, actor_user_id, source, note)
+      VALUES (${order.id}, 'RIDER_ASSIGNED'::order_status, 'PICKED_UP'::order_status, ${actorUserId}, 'admin', 'Order picked up by rider.')
+    `;
+    await tx`
+      INSERT INTO notifications (user_id, order_id, channel, event_type, destination, subject, body)
+      VALUES (${order.user_id}, ${order.id}, 'IN_APP', 'ORDER_PICKED_UP', ${order.customer_phone}, 'Order picked up', ${`Order ${orderNumber} has been picked up by the rider.`})
+    `;
+    await recordAdminActivity(tx, actorUserId, "delivery.picked_up", "delivery_assignment", assignment.id, { orderNumber, riderId: assignment.rider_id });
+    await enqueueTelegramAlert(tx, {
+      eventType: "DRIVER_PICKED_UP",
+      entityType: "delivery_assignment",
+      entityId: assignment.id,
+      title: `Picked up · ${orderNumber}`,
+      body: `The rider picked up ${orderNumber}.`,
+    });
+    return { orderNumber, assignmentId: assignment.id, status: "PICKED_UP" };
   });
 }
 
@@ -431,7 +497,7 @@ export async function updateRiderAssignment(
           : "DELIVERED";
     const orderStatus =
       action === "PICKED_UP"
-        ? "OUT_FOR_DELIVERY"
+        ? "PICKED_UP"
         : action === "DELIVERED"
           ? "DELIVERED"
           : assignment.order_status;

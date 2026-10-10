@@ -146,9 +146,8 @@ const deliveryStatuses = [
 
 const driverStatuses = [
   { value: "all", label: "All drivers" },
-  { value: "ONLINE", label: "Online" },
+  { value: "AVAILABLE", label: "Available" },
   { value: "BUSY", label: "Busy" },
-  { value: "OFFLINE", label: "Offline" },
   { value: "OFFBOARDED", label: "Offboarded" },
 ];
 
@@ -165,7 +164,7 @@ function cancellationRate(driver: Driver) {
 }
 
 function statusColor(status: string) {
-  if (["DELIVERED", "ONLINE", "PAID"].includes(status))
+  if (["DELIVERED", "ONLINE", "AVAILABLE", "PAID"].includes(status))
     return "success" as const;
   if (["DECLINED", "CANCELLED", "OFFBOARDED"].includes(status))
     return "error" as const;
