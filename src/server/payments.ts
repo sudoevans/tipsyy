@@ -993,7 +993,7 @@ export async function processMpesaCallback(payload: StkCallbackPayload) {
       const orderStatus = failureOrderStatus(resultCode);
       await releaseOrderReservations(tx, attempt.order_id);
       await tx`
-        UPDATE payment_attempts SET callback_payload = ${tx.json(serializedPayload)}, status = ${resultStatus},
+        UPDATE payment_attempts SET callback_payload = ${tx.json(serializedPayload)}, status = ${resultStatus}::payment_status,
           result_code = ${String(resultCode)}, result_description = ${resultDescription},
           callback_received_at = now(), completed_at = now()
         WHERE id = ${attempt.attempt_id}

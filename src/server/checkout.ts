@@ -229,7 +229,7 @@ export async function releaseExpiredReservations(tx: Transaction) {
     `;
     await tx`
       UPDATE payment_attempts pa
-      SET status = CASE WHEN pa.checkout_request_id IS NOT NULL THEN 'TIMED_OUT' ELSE 'FAILED' END,
+      SET status = CASE WHEN pa.checkout_request_id IS NOT NULL THEN 'TIMED_OUT'::payment_status ELSE 'FAILED'::payment_status END,
           result_description = CASE
             WHEN pa.checkout_request_id IS NOT NULL THEN 'M-Pesa prompt expired before a payment result was received.'
             ELSE 'The checkout reservation expired before an M-Pesa prompt was sent.'
