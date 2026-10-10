@@ -71,43 +71,79 @@ export default function BasicTableOne({
       ) : null}
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-white/5 dark:bg-white/3">
         {rows.length ? (
-          <div
-            className={
-              noHorizontalScroll ? "w-full" : "max-w-full overflow-x-auto"
-            }
-          >
-            <Table
-              className={noHorizontalScroll ? "w-full table-fixed" : undefined}
+          <>
+            <div className="space-y-3 p-3 lg:hidden">
+              {visibleRows.map((row, rowIndex) => (
+                <article
+                  key={rowIndex}
+                  className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900"
+                >
+                  {row[0] !== undefined ? (
+                    <div className="border-b border-gray-100 px-3 py-3 dark:border-gray-800">
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                        {columns[0]}
+                      </p>
+                      <div className="mt-1 min-w-0 break-words text-sm font-semibold text-gray-800 dark:text-white/90">
+                        {row[0]}
+                      </div>
+                    </div>
+                  ) : null}
+                  {columns.length > 1 ? (
+                    <dl className="divide-y divide-gray-100 px-3 dark:divide-gray-800">
+                      {columns.slice(1).map((column, index) => (
+                        <div
+                          key={`${column}-${index}`}
+                          className="grid grid-cols-[minmax(6.5rem,0.8fr)_minmax(0,1.2fr)] items-start gap-3 py-3"
+                        >
+                          <dt className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                            {column}
+                          </dt>
+                          <dd className="min-w-0 break-words text-left text-sm text-gray-700 dark:text-gray-300">
+                            {row[index + 1] ?? "—"}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+            <div
+              className={`hidden lg:block ${noHorizontalScroll ? "w-full" : "max-w-full overflow-x-auto"}`}
             >
-              <TableHeader className="border-b border-gray-100 dark:border-white/5">
-                <TableRow>
-                  {columns.map((column) => (
-                    <TableCell
-                      key={column}
-                      isHeader
-                      className={`px-4 py-3 text-start text-theme-xs font-medium text-gray-500 dark:text-gray-400 ${cellLayout}`}
-                    >
-                      {column}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody className="divide-y divide-gray-100 dark:divide-white/5">
-                {visibleRows.map((row, rowIndex) => (
-                  <TableRow key={rowIndex}>
-                    {row.map((cell, cellIndex) => (
+              <Table
+                className={noHorizontalScroll ? "w-full table-fixed" : undefined}
+              >
+                <TableHeader className="border-b border-gray-100 dark:border-white/5">
+                  <TableRow>
+                    {columns.map((column) => (
                       <TableCell
-                        key={cellIndex}
-                        className={`px-4 py-4 text-start text-theme-sm text-gray-500 dark:text-gray-400 ${cellLayout}`}
+                        key={column}
+                        isHeader
+                        className={`px-4 py-3 text-start text-theme-xs font-medium text-gray-500 dark:text-gray-400 ${cellLayout}`}
                       >
-                        {cell}
+                        {column}
                       </TableCell>
                     ))}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody className="divide-y divide-gray-100 dark:divide-white/5">
+                  {visibleRows.map((row, rowIndex) => (
+                    <TableRow key={rowIndex}>
+                      {row.map((cell, cellIndex) => (
+                        <TableCell
+                          key={cellIndex}
+                          className={`px-4 py-4 text-start text-theme-sm text-gray-500 dark:text-gray-400 ${cellLayout}`}
+                        >
+                          {cell}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         ) : (
           <div className="px-5 py-16 text-center text-sm text-gray-500 dark:text-gray-400">
             {empty}
