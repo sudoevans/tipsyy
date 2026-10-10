@@ -3,6 +3,7 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import Button from "@/components/ui/button/Button";
 import TelegramNotificationSettings from "@/components/admin/TelegramNotificationSettings";
+import WhatsAppSupportSettings from "@/components/admin/WhatsAppSupportSettings";
 import { sql } from "@/server/db";
 import { getServerEnv } from "@/server/env";
 import { saveOperationsSettings } from "../actions";
@@ -17,13 +18,14 @@ type SettingsValue = {
   chatId?: string;
   events?: Record<string, boolean>;
   botTokenEncrypted?: string;
+  number?: string;
 };
 
 export default async function SettingsPage() {
   const [settings, env] = await Promise.all([
     sql<{ key: string; value: SettingsValue }[]>`
       SELECT key,value FROM platform_settings
-      WHERE key IN ('inventory.low_stock_threshold','store.operating_hours','notifications.telegram')
+      WHERE key IN ('inventory.low_stock_threshold','store.operating_hours','notifications.telegram','support.whatsapp')
     `,
     Promise.resolve(getServerEnv()),
   ]);
@@ -31,6 +33,7 @@ export default async function SettingsPage() {
   const inventory = byKey.get("inventory.low_stock_threshold");
   const hours = byKey.get("store.operating_hours");
   const telegram = byKey.get("notifications.telegram");
+  const whatsapp = byKey.get("support.whatsapp");
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -59,6 +62,7 @@ export default async function SettingsPage() {
         events={telegram?.events ?? {}}
         tokenConfigured={Boolean(telegram?.botTokenEncrypted || env.TELEGRAM_BOT_TOKEN)}
       />
+      <WhatsAppSupportSettings supportNumber={whatsapp?.number ?? ""} />
     </div>
   );
 }
