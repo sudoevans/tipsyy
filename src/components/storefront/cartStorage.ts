@@ -13,6 +13,7 @@ export interface CheckoutDetails {
 type CartSnapshot = Record<string, number>;
 
 let cartWriteQueue: Promise<unknown> = Promise.resolve();
+let latestCartWrite: Promise<CartSnapshot> | null = null;
 
 function cartItems(cart: CartSnapshot) {
   return Object.entries(cart)
@@ -64,6 +65,7 @@ export function confirmCartForCheckout(cart: CartSnapshot) {
       return cart;
     });
   cartWriteQueue = request.catch(() => undefined);
+  latestCartWrite = request;
   return request;
 }
 
@@ -93,6 +95,22 @@ export function readCartForCheckout() {
 }
 
 export async function restoreCartForCheckout() {
+  while (latestCartWrite) {
+    const currentWrite = latestCartWrite;
+    try {
+      const syncedCart = await currentWrite;
+      if (currentWrite === latestCartWrite) {
+        latestCartWrite = null;
+        return syncedCart;
+      }
+    } catch {
+      if (currentWrite === latestCartWrite) {
+        latestCartWrite = null;
+        return readCartForCheckout();
+      }
+    }
+  }
+
   const localCart = readCartForCheckout();
   try {
     const response = await fetch("/api/v1/cart", {

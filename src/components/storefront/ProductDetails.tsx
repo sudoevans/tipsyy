@@ -6,11 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import CartDrawer from "./CartDrawer";
 import MobileCartToast from "./MobileCartToast";
-import {
-  confirmCartForCheckout,
-  restoreCartForCheckout,
-  saveCartForCheckout,
-} from "./cartStorage";
+import { restoreCartForCheckout, saveCartForCheckout } from "./cartStorage";
 import BeverageImage from "./BeverageImage";
 import { formatPrice } from "./currency";
 import type { StoreProduct } from "./data";
@@ -18,7 +14,6 @@ import ProductCard from "./ProductCard";
 import StoreFooter from "./StoreFooter";
 import StoreHeader from "./StoreHeader";
 import StoreIcon from "./StoreIcon";
-import { useStorefrontToast } from "./StorefrontToast";
 import useCatalogProducts from "./useCatalogProducts";
 
 interface ProductDetailsProps {
@@ -29,16 +24,13 @@ export default function ProductDetails({ product }: ProductDetailsProps) {
   const router = useRouter();
   const t = useTranslations("storefront");
   const { products } = useCatalogProducts();
-  const { showToast } = useStorefrontToast();
   const [cart, setCart] = useState<Record<string, number>>({});
   const [cartOpen, setCartOpen] = useState(false);
   const [isMobileCartToastOpen, setIsMobileCartToastOpen] = useState(false);
   const [isNavigatingToCheckout, setIsNavigatingToCheckout] = useState(false);
-  const [isAdding, setIsAdding] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [query, setQuery] = useState("");
   const hasRestoredCart = useRef(false);
-  const checkoutTimer = useRef<number | null>(null);
   const variants = product.variants ?? [
     {
       id: "default",
@@ -87,29 +79,16 @@ export default function ProductDetails({ product }: ProductDetailsProps) {
       else next[productId] = Math.min(nextQuantity, stock);
       return next;
     });
-  const addToCart = async () => {
-    if (isAdding) return;
+  const addToCart = () => {
+    if (!available) return;
     const stock = product.availableQuantity ?? 100;
     const nextCart = {
       ...cart,
       [product.id]: Math.min((cart[product.id] ?? 0) + quantity, stock),
     };
-    setIsAdding(true);
-    try {
-      const confirmed = await confirmCartForCheckout(nextCart);
-      setCart(confirmed);
-      if (window.matchMedia("(min-width: 640px)").matches) setCartOpen(true);
-      else setIsMobileCartToastOpen(true);
-    } catch (error) {
-      showToast({
-        title: "Couldn’t update your cart",
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-        tone: "error",
-      });
-    } finally {
-      setIsAdding(false);
-    }
+    setCart(nextCart);
+    if (window.matchMedia("(min-width: 640px)").matches) setCartOpen(true);
+    else setIsMobileCartToastOpen(true);
   };
   const productDetail = (
     field: "description" | "type" | "country" | "abv",
@@ -145,37 +124,17 @@ export default function ProductDetails({ product }: ProductDetailsProps) {
     };
   }, []);
 
-  useEffect(
-    () => () => {
-      if (checkoutTimer.current) window.clearTimeout(checkoutTimer.current);
-    },
-    [],
-  );
-
   useEffect(() => {
     if (hasRestoredCart.current) saveCartForCheckout(cart);
   }, [cart]);
 
-  const proceedToCheckout = async () => {
+  const proceedToCheckout = () => {
     if (isNavigatingToCheckout) return;
     setCartOpen(false);
     setIsMobileCartToastOpen(false);
     setIsNavigatingToCheckout(true);
-    try {
-      await confirmCartForCheckout(cart);
-      checkoutTimer.current = window.setTimeout(
-        () => router.push("/checkout"),
-        350,
-      );
-    } catch (error) {
-      setIsNavigatingToCheckout(false);
-      showToast({
-        title: "Couldn’t prepare checkout",
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-        tone: "error",
-      });
-    }
+    saveCartForCheckout(cart);
+    router.push("/checkout");
   };
 
   return (
@@ -271,7 +230,7 @@ export default function ProductDetails({ product }: ProductDetailsProps) {
                 <button
                   aria-label={t("details.decreaseQuantity")}
                   className="flex size-10 items-center justify-center rounded-[10px] transition hover:bg-white"
-                  disabled={quantity === 1 || isAdding}
+                  disabled={quantity === 1}
                   onClick={() =>
                     setQuantity((current) => Math.max(1, current - 1))
                   }
@@ -286,7 +245,6 @@ export default function ProductDetails({ product }: ProductDetailsProps) {
                   aria-label={t("details.increaseQuantity")}
                   className="flex size-10 items-center justify-center rounded-[10px] bg-white transition hover:bg-tipsy-amber-100 disabled:opacity-40"
                   disabled={
-                    isAdding ||
                     (product.availableQuantity !== undefined &&
                       quantity >= product.availableQuantity)
                   }
@@ -305,15 +263,11 @@ export default function ProductDetails({ product }: ProductDetailsProps) {
               </div>
               <button
                 className="h-12 flex-1 rounded-xl bg-tipsy-amber-500 px-5 text-sm font-semibold text-tipsy-ink transition hover:bg-tipsy-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!available || isAdding}
+                disabled={!available}
                 onClick={addToCart}
                 type="button"
               >
-                {available
-                  ? isAdding
-                    ? "Adding…"
-                    : t("details.addToCart")
-                  : "Out of stock"}
+                {available ? t("details.addToCart") : "Out of stock"}
               </button>
             </div>
           </div>
@@ -375,7 +329,7 @@ export default function ProductDetails({ product }: ProductDetailsProps) {
         >
           <div className="flex items-center gap-3 rounded-2xl bg-white px-5 py-4 text-sm font-semibold text-tipsy-ink shadow-[0_12px_36px_rgba(21,19,15,0.16)]">
             <span className="size-4 animate-spin rounded-full border-2 border-tipsy-line border-t-tipsy-ink" />
-            Preparing secure checkout
+            Opening checkout…
           </div>
         </div>
       ) : null}
