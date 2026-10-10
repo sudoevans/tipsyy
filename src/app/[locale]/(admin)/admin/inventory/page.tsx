@@ -49,7 +49,36 @@ export default async function InventoryPage({
     1,
     Number.parseInt(input.page ?? "1", 10) || 1,
   );
-  const [countRows, catalogueRows] = await Promise.all([
+  const loadInventoryPage = (targetPage: number) => sql<InventoryItem[]>`
+    SELECT v.id AS variant_id,p.id AS product_id,p.name,v.label,v.sku,i.on_hand_quantity,i.reserved_quantity,
+           (i.on_hand_quantity - i.reserved_quantity)::int AS available,i.low_stock_threshold,i.storefront_enabled
+    FROM inventory i
+    JOIN product_variants v ON v.id = i.variant_id
+    JOIN products p ON p.id = v.product_id
+    WHERE (${q} = '' OR p.name ILIKE ${`%${q}%`} OR v.sku ILIKE ${`%${q}%`} OR v.label ILIKE ${`%${q}%`})
+      AND (${health} = 'all'
+        OR (${health} = 'out' AND i.on_hand_quantity - i.reserved_quantity <= 0)
+        OR (${health} = 'low' AND i.on_hand_quantity - i.reserved_quantity > 0 AND i.on_hand_quantity - i.reserved_quantity <= i.low_stock_threshold)
+        OR (${health} = 'healthy' AND i.on_hand_quantity - i.reserved_quantity > i.low_stock_threshold))
+    ORDER BY
+      CASE WHEN ${sort}='product' AND ${direction}='asc' THEN lower(p.name) END ASC,
+      CASE WHEN ${sort}='product' AND ${direction}='desc' THEN lower(p.name) END DESC,
+      CASE WHEN ${sort}='variant' AND ${direction}='asc' THEN lower(v.label) END ASC,
+      CASE WHEN ${sort}='variant' AND ${direction}='desc' THEN lower(v.label) END DESC,
+      CASE WHEN ${sort}='sku' AND ${direction}='asc' THEN lower(v.sku) END ASC,
+      CASE WHEN ${sort}='sku' AND ${direction}='desc' THEN lower(v.sku) END DESC,
+      CASE WHEN ${sort}='reserved' AND ${direction}='asc' THEN i.reserved_quantity END ASC,
+      CASE WHEN ${sort}='reserved' AND ${direction}='desc' THEN i.reserved_quantity END DESC,
+      CASE WHEN ${sort}='inStock' AND ${direction}='asc' THEN i.on_hand_quantity END ASC,
+      CASE WHEN ${sort}='inStock' AND ${direction}='desc' THEN i.on_hand_quantity END DESC,
+      CASE WHEN ${sort}='available' AND ${direction}='asc' THEN i.on_hand_quantity-i.reserved_quantity END ASC,
+      CASE WHEN ${sort}='available' AND ${direction}='desc' THEN i.on_hand_quantity-i.reserved_quantity END DESC,
+      CASE WHEN ${sort}='health' AND ${direction}='asc' THEN CASE WHEN i.on_hand_quantity-i.reserved_quantity<=0 THEN 0 WHEN i.on_hand_quantity-i.reserved_quantity<=i.low_stock_threshold THEN 1 ELSE 2 END END ASC,
+      CASE WHEN ${sort}='health' AND ${direction}='desc' THEN CASE WHEN i.on_hand_quantity-i.reserved_quantity<=0 THEN 0 WHEN i.on_hand_quantity-i.reserved_quantity<=i.low_stock_threshold THEN 1 ELSE 2 END END DESC,
+      lower(p.name),lower(v.label)
+    LIMIT ${pageSize} OFFSET ${(targetPage - 1) * pageSize}
+  `;
+  const [countRows, catalogueRows, requestedItems] = await Promise.all([
     sql<{ count: number }[]>`
       SELECT COUNT(*)::int AS count
       FROM inventory i
