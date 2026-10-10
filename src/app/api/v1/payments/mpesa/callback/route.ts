@@ -18,6 +18,6 @@ export async function POST(request: Request) {
     console.info(JSON.stringify({ level: "info", requestId, message: "M-Pesa callback processed", ...result }));
     return Response.json({ ResultCode: 0, ResultDesc: "Accepted" });
   } catch (error) {
-    return apiErrorResponse(error, requestId);
+    return apiErrorResponse(error, requestId, "mpesa.stk.callback");
   }
 }

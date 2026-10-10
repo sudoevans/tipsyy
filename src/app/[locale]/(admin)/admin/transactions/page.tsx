@@ -1,6 +1,7 @@
 import AdminPagination from "@/components/admin/AdminPagination";
 import OrderFilters from "@/components/admin/OrderFilters";
 import PaymentInvestigationActions from "@/components/admin/PaymentInvestigationActions";
+import CheckStkStatusButton from "@/components/admin/CheckStkStatusButton";
 import BasicTableOne from "@/components/tables/BasicTableOne";
 import Badge from "@/components/ui/badge/Badge";
 import { getAdminFromSession } from "@/server/admin-auth";
@@ -38,6 +39,7 @@ type TransactionRow = {
   investigation_status: string | null;
   claimed_receipt: string | null;
 };
+type MpesaReceiptRow = { receipt: string; source: string; amount_minor: number; payer_phone: string | null; bill_reference: string | null; paid_at: Date | null; status: string };
 
 function badgeColor(status: string) {
   if (status === "SUCCEEDED") return "success" as const;
@@ -49,7 +51,7 @@ function badgeColor(status: string) {
 export default async function TransactionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; status?: string; page?: string; receiptsPage?: string }>;
 }) {
   const input = await searchParams;
   const cookieStore = await cookies();
@@ -114,6 +116,17 @@ export default async function TransactionsPage({
     )
     ORDER BY COALESCE(pa.initiated_at, p.created_at) DESC
     LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+  `;
+  const receiptsPageSize = 8;
+  const requestedReceiptsPage = Math.max(1, Number.parseInt(input.receiptsPage ?? "1", 10) || 1);
+  const receiptCounts = await sql<{ count: number }[]>`SELECT COUNT(*)::int AS count FROM mpesa_receipts WHERE status <> 'MATCHED'`;
+  const receiptTotal = receiptCounts[0]?.count ?? 0;
+  const receiptsPageCount = Math.max(1, Math.ceil(receiptTotal / receiptsPageSize));
+  const receiptsPage = Math.min(requestedReceiptsPage, receiptsPageCount);
+  const unmatchedReceipts = await sql<MpesaReceiptRow[]>`
+    SELECT receipt, source, amount_minor, payer_phone, bill_reference, paid_at, status
+    FROM mpesa_receipts WHERE status <> 'MATCHED'
+    ORDER BY received_at DESC LIMIT ${receiptsPageSize} OFFSET ${(receiptsPage - 1) * receiptsPageSize}
   `;
 
   return (
@@ -216,12 +229,32 @@ export default async function TransactionsPage({
               {transaction.result_description ?? "—"}
             </span>,
             <div className="space-y-1" key="review">
+              <CheckStkStatusButton orderNumber={transaction.order_number} status={transaction.payment_status} amountMinor={transaction.amount_minor} payerPhone={transaction.customer_phone} providerReceipt={transaction.provider_receipt} />
+              {transaction.payment_status === "SUCCEEDED" && !transaction.provider_receipt ? <Badge color="warning" size="sm">Receipt pending</Badge> : null}
               {transaction.investigation_status ? <Badge color={transaction.investigation_status === "CONFIRMED" ? "success" : transaction.investigation_status === "REJECTED" ? "error" : "warning"} size="sm">{transaction.investigation_status.replaceAll("_", " ")}</Badge> : null}
               {transaction.claimed_receipt ? <p className="font-mono text-xs text-gray-500">Claimed: {transaction.claimed_receipt}</p> : null}
               <PaymentInvestigationActions canConfirm={admin?.role === "ADMIN"} investigationId={transaction.investigation_id} status={transaction.investigation_status} receipt={transaction.claimed_receipt} payerPhone={transaction.customer_phone} amountMinor={transaction.amount_minor} />
             </div>,
           ];
         })}
+      />
+      <BasicTableOne
+        title="Paybill receipts needing review"
+        description="Successful M-Pesa credits that have not been safely matched to an order."
+        columns={["Receipt", "Source", "Order reference", "Payer", "Amount", "Paid at", "Status"]}
+        empty="No unmatched Paybill receipts."
+        pagination={false}
+        noHorizontalScroll
+        footer={<AdminPagination page={receiptsPage} pageCount={receiptsPageCount} total={receiptTotal} pageSize={receiptsPageSize} pageParam="receiptsPage" />}
+        rows={unmatchedReceipts.map((receipt) => [
+          <span className="font-mono font-semibold" key="receipt">{receipt.receipt}</span>,
+          receipt.source === "PULL_QUERY" ? "Paybill Pull" : receipt.source === "C2B_CONFIRMATION" ? "Paybill" : "STK Push",
+          receipt.bill_reference || "—",
+          receipt.payer_phone || "Not supplied",
+          money.format(receipt.amount_minor),
+          receipt.paid_at ? dateTime.format(receipt.paid_at) : "—",
+          <Badge color="error" size="sm" key="status">{receipt.status}</Badge>,
+        ])}
       />
     </div>
   );

@@ -545,7 +545,11 @@ export default function CheckoutExperience() {
         setStep("complete");
         setToast({
           title: "Payment confirmed",
-          description: `Order ${snapshot.orderNumber} is confirmed.`,
+          description: ["CANCELLED", "PAYMENT_CANCELLED"].includes(snapshot.status)
+            ? `Payment received for ${snapshot.orderNumber}; the cancelled order was not reopened and needs a refund review.`
+            : snapshot.status === "PAID_REQUIRES_REVIEW"
+              ? `Payment confirmed for ${snapshot.orderNumber}; item availability needs review.`
+              : `Order ${snapshot.orderNumber} is confirmed.`,
         });
         return true;
       }
@@ -1198,7 +1202,7 @@ export default function CheckoutExperience() {
                 type="submit"
               >
                 {isAdvancingToPayment
-                  ? "Preparing payment…"
+                  ? "Confirming order…"
                   : "Continue to payment"}
               </button>
             </form>
@@ -1332,13 +1336,14 @@ export default function CheckoutExperience() {
                 Payment successful
               </h1>
               <p className="mt-3 text-[15px] leading-5 text-tipsy-muted">
-                Your order is confirmed and is now being prepared.
+                {orderSnapshot && ["CANCELLED", "PAYMENT_CANCELLED"].includes(orderSnapshot.status) ? "Payment arrived after this order was cancelled. The order has not been reopened; our team will review the refund." : orderSnapshot?.status === "PAID_REQUIRES_REVIEW" ? "Your payment is confirmed. We’re checking item availability before confirming fulfilment." : "Your order is confirmed and is now being prepared."}
               </p>
               <div className="mt-6 rounded-xl bg-tipsy-surface p-4 text-left text-[14px]">
                 <div className="flex justify-between gap-4">
                   <span className="text-tipsy-muted">M-Pesa receipt</span>
-                  <strong>{paymentReceipt?.code ?? "—"}</strong>
+                  <strong>{paymentReceipt?.code && paymentReceipt.code !== "—" ? paymentReceipt.code : "Receipt pending"}</strong>
                 </div>
+                {!paymentReceipt?.code || paymentReceipt.code === "—" ? <p className="mt-2 text-xs leading-4 text-tipsy-muted">Your payment is confirmed. The M-Pesa receipt will appear here when Safaricom sends it.</p> : null}
                 <div className="mt-3 flex justify-between gap-4">
                   <span className="text-tipsy-muted">Date & time</span>
                   <strong className="text-right">
@@ -1428,7 +1433,7 @@ export default function CheckoutExperience() {
               {isAdvancingToPayment ? (
                 <>
                   <span className="size-4 animate-spin rounded-full border-2 border-tipsy-ink/25 border-t-tipsy-ink" />
-                  Preparing payment…
+                  Confirming order…
                 </>
               ) : mobileCheckoutView === "summary" ? (
                 "Continue to delivery"
@@ -1693,7 +1698,7 @@ export default function CheckoutExperience() {
                     type="submit"
                   >
                     {isAdvancingToPayment ? (
-                      "Preparing payment…"
+                      "Confirming order…"
                     ) : (
                       <>
                         Continue to payment{" "}
@@ -1701,6 +1706,9 @@ export default function CheckoutExperience() {
                       </>
                     )}
                   </button>
+                  <p className="mt-2 text-center text-xs leading-5 text-tipsy-muted">
+                    We confirm stock, delivery distance and your total here. The M-Pesa prompt is sent in the next step.
+                  </p>
                 </div>
               </form>
             ) : null}
@@ -1901,8 +1909,7 @@ export default function CheckoutExperience() {
                   You’re all set
                 </h1>
                 <p className="mx-auto mt-2 max-w-sm text-sm leading-5 text-tipsy-muted">
-                  Your payment is confirmed and your order is now being
-                  prepared.
+                  {orderSnapshot && ["CANCELLED", "PAYMENT_CANCELLED"].includes(orderSnapshot.status) ? "Payment arrived after this order was cancelled. The order has not been reopened; our team will review the refund." : orderSnapshot?.status === "PAID_REQUIRES_REVIEW" ? "Your payment is confirmed. We’re checking item availability before confirming fulfilment." : "Your payment is confirmed and your order is now being prepared."}
                 </p>
                 <div className="mt-6 rounded-xl bg-tipsy-surface p-4 text-left">
                   <div className="flex items-center justify-between">
@@ -1915,9 +1922,10 @@ export default function CheckoutExperience() {
                     <div className="flex items-center justify-between gap-4">
                       <dt className="text-tipsy-muted">M-Pesa receipt</dt>
                       <dd className="font-bold tracking-[0.08em] text-tipsy-ink">
-                        {paymentReceipt?.code ?? "—"}
+                        {paymentReceipt?.code && paymentReceipt.code !== "—" ? paymentReceipt.code : "Receipt pending"}
                       </dd>
                     </div>
+                    {!paymentReceipt?.code || paymentReceipt.code === "—" ? <p className="text-xs leading-4 text-tipsy-muted">Your payment is confirmed. The M-Pesa receipt will appear here when Safaricom sends it.</p> : null}
                     <div className="flex items-center justify-between gap-4">
                       <dt className="text-tipsy-muted">Date & time</dt>
                       <dd className="text-right font-semibold text-tipsy-ink">

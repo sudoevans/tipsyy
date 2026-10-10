@@ -30,6 +30,14 @@ export interface StkPushQueryResponse {
   errorMessage?: string;
 }
 
+export interface PullTransactionsResponse {
+  ResponseRefID?: string;
+  ResponseCode?: string | number;
+  ResponseMessage?: string;
+  Response?: unknown;
+  [key: string]: unknown;
+}
+
 export interface StkCallbackItem {
   Name: string;
   Value?: string | number;
@@ -64,6 +72,21 @@ function darajaTimestamp(date = new Date()) {
   }).formatToParts(date);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
   return `${part("year")}${part("month")}${part("day")}${part("hour")}${part("minute")}${part("second")}`;
+}
+
+function darajaDateTime(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Nairobi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}:${part("second")}`;
 }
 
 async function parseDarajaResponse<T>(response: Response): Promise<T> {
@@ -160,6 +183,38 @@ export async function queryStkPushStatus(checkoutRequestId: string) {
     request: { ...request, Password: "[REDACTED]" },
     response: payload,
   };
+}
+
+export async function queryMpesaPullTransactions(input: {
+  startDate: Date;
+  endDate: Date;
+  offset: number;
+  accessToken?: string;
+}) {
+  const config = requireMpesaConfig();
+  const accessToken = input.accessToken ?? await getMpesaAccessToken();
+  const request = {
+    ShortCode: config.shortcode,
+    StartDate: darajaDateTime(input.startDate),
+    EndDate: darajaDateTime(input.endDate),
+    OffSetValue: String(input.offset),
+  };
+  const response = await fetch(`${apiBase(config.environment)}/pulltransactions/v1/query`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+    cache: "no-store",
+    signal: AbortSignal.timeout(6_000),
+  });
+  const payload = await parseDarajaResponse<PullTransactionsResponse>(response);
+  const code = String(payload.ResponseCode ?? "");
+  if (code !== "1000" && code !== "0" && code !== "1001") {
+    throw new ApiError(502, "MPESA_PULL_FAILED", payload.ResponseMessage ?? "M-Pesa could not retrieve transactions for this period.", {
+      providerCode: code || undefined,
+      responseRefId: payload.ResponseRefID,
+    });
+  }
+  return { request, response: payload };
 }
 
 export function mpesaCallbackMetadata(payload: StkCallbackPayload) {
