@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { saveTelegramNotificationSettings, testTelegramConnection } from "@/app/[locale]/(admin)/admin/actions";
 import { useAdminToast } from "@/components/admin/AdminToast";
 
@@ -21,6 +21,7 @@ export default function TelegramNotificationSettings({
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [pending, startTransition] = useTransition();
+  const [hasSavedToken, setHasSavedToken] = useState(tokenConfigured);
   const { showToast } = useAdminToast();
   const test = () => {
     const form = formRef.current;
@@ -43,6 +44,9 @@ export default function TelegramNotificationSettings({
       startTransition(async () => {
         try {
           await saveTelegramNotificationSettings(data);
+          setHasSavedToken(true);
+          const tokenInput = formRef.current?.elements.namedItem("botToken");
+          if (tokenInput instanceof HTMLInputElement) tokenInput.value = "";
           showToast({ title: "Telegram settings saved", tone: "success" });
         } catch (error) {
           showToast({ title: "Could not save Telegram settings", description: error instanceof Error ? error.message : "Please try again.", tone: "error" });
@@ -57,9 +61,13 @@ export default function TelegramNotificationSettings({
         Telegram group or chat ID
         <input name="chatId" defaultValue={chatId} placeholder="e.g. -1001234567890" className="mt-1.5 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm outline-none focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10" />
       </label>
+      <label className="block text-sm font-medium text-gray-700">
+        Telegram bot token
+        <input name="botToken" type="password" autoComplete="new-password" placeholder={hasSavedToken ? "Saved securely — enter a new token to replace" : "Paste bot token from BotFather"} className="mt-1.5 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm outline-none focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10" />
+      </label>
       <p className="-mt-3 text-xs leading-5 text-gray-500">
-        Add the bot to your operations group. Configure <code>TELEGRAM_BOT_TOKEN</code> as a Cloudflare secret; it is never stored in this form.
-        {!tokenConfigured ? " The token is not currently configured." : " The bot token is configured."}
+        The token is encrypted before it is stored and is never sent back to the browser. Leave blank to keep the saved token. Keep the app session secret stable; rotate and re-save this token if that secret changes.
+        {!hasSavedToken ? " No bot token is configured yet." : " A bot token is saved."}
       </p>
       <div className="grid gap-4 sm:grid-cols-3">
         {eventGroups.map((group) => (
@@ -76,7 +84,7 @@ export default function TelegramNotificationSettings({
       </div>
       <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-4">
         <button className="h-10 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50" disabled={pending} type="submit">{pending ? "Saving…" : "Save notification settings"}</button>
-        <button className="h-10 rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50" disabled={pending || !tokenConfigured} onClick={test} type="button">
+        <button className="h-10 rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50" disabled={pending || !hasSavedToken} onClick={test} type="button">
           {pending ? "Testing…" : "Send test message"}
         </button>
       </div>

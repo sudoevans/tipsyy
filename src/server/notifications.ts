@@ -1,5 +1,6 @@
 import { getServerEnv } from "./env";
 import { sql, type Database, type Transaction } from "./db";
+import { decryptPlatformSecret } from "./security";
 
 interface NotificationRow { id: string; channel: string; destination: string; subject: string | null; body: string; attempts: number }
 
@@ -28,8 +29,14 @@ export async function enqueueTelegramAlert(
 }
 
 export async function sendTelegramMessage(chatId: string, text: string) {
-  const token = getServerEnv().TELEGRAM_BOT_TOKEN;
-  if (!token) throw new Error("Telegram is not configured. Add TELEGRAM_BOT_TOKEN to the Cloudflare secret store.");
+  const [setting] = await sql<{ value: { botTokenEncrypted?: string } }[]>`
+    SELECT value FROM platform_settings WHERE key='notifications.telegram'
+  `;
+  const encryptedToken = setting?.value?.botTokenEncrypted;
+  const token = encryptedToken
+    ? decryptPlatformSecret(encryptedToken)
+    : getServerEnv().TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("Telegram is not configured. Add the bot token in Admin Settings.");
   const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
