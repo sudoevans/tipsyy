@@ -75,6 +75,12 @@ export async function transitionOrder(
       FROM orders WHERE order_number = ${orderNumber} FOR UPDATE
     `;
     if (!order) throw new ApiError(404, "ORDER_NOT_FOUND", "Order not found.");
+    // A repeated request from a second tap, another tab, or a retried network
+    // call is successful if the desired state was already committed. Do not
+    // emit duplicate order events, notifications, or audit entries.
+    if (order.status === toStatus) {
+      return { orderNumber, previousStatus: order.status, status: toStatus, unchanged: true };
+    }
     if (!(transitions[order.status] ?? []).includes(toStatus)) {
       throw new ApiError(
         409,

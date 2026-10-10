@@ -87,7 +87,7 @@ export default async function OrdersPage({
           {o.status.replaceAll("_", " ")}
         </Badge>,
         <AdminOrderActions
-          key="a"
+          key={`${o.order_number}:${o.status}`}
           orderNumber={o.order_number}
           status={o.status}
           riders={availableRiders}
