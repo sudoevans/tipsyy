@@ -4,6 +4,7 @@ import Button from "@/components/ui/button/Button";
 import { useRouter } from "@/i18n/navigation";
 import { ChevronDownIcon, SearchLgIcon } from "@untitledui/icons-react/outline";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAdminToast } from "@/components/admin/AdminToast";
 
 const nextStatus: Record<string, { status: string; label: string } | undefined> = {
@@ -23,7 +24,7 @@ export default function AdminOrderActions({ orderNumber, status, riders, payment
   const [riderId, setRiderId] = useState(riders.find((rider) => !rider.busy)?.id ?? "");
   const [assignOpen, setAssignOpen] = useState(false);
   const [riderQuery, setRiderQuery] = useState("");
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
   const [error, setError] = useState("");
   const [refundOpen, setRefundOpen] = useState(false);
   const { showToast } = useAdminToast();
@@ -63,8 +64,86 @@ export default function AdminOrderActions({ orderNumber, status, riders, payment
         <ChevronDownIcon className="ml-2 size-4" />
       </Button>
       {!riders.length ? <p className="mt-1 max-w-56 whitespace-normal text-xs text-gray-500">No active rider accounts are available.</p> : null}
-      {error ? <p className="mt-1 max-w-64 whitespace-normal text-xs text-error-600">{error}</p> : null}
-      {assignOpen ? <div className="fixed inset-0 z-[160] grid place-items-center bg-gray-950/45 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setAssignOpen(false); }}><section aria-labelledby={`assign-rider-title-${orderNumber}`} aria-modal="true" className="w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900" ref={dialogRef} role="dialog"><div className="border-b border-gray-100 p-4 dark:border-gray-800"><h2 className="text-base font-semibold text-gray-900 dark:text-white" id={`assign-rider-title-${orderNumber}`}>Assign rider to {orderNumber}</h2><p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Riders with an active delivery can’t take another order.</p><label className="relative mt-4 block"><span className="sr-only">Search riders by name or phone</span><SearchLgIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" /><input autoFocus className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-9 pr-3 text-sm text-gray-800 outline-none placeholder:text-gray-400 focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100" onChange={(event) => setRiderQuery(event.target.value)} placeholder="Search name or phone" value={riderQuery} /></label></div><div className="max-h-64 overflow-y-auto p-2">{filteredRiders.length ? filteredRiders.map((rider) => { const selected = rider.id === riderId; return <button aria-pressed={selected} className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left transition ${rider.busy ? "cursor-not-allowed opacity-55" : selected ? "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "hover:bg-gray-50 dark:hover:bg-white/5"}`} disabled={rider.busy || busy} key={rider.id} onClick={() => setRiderId(rider.id)} type="button"><span className="min-w-0"><span className="block truncate text-sm font-medium text-gray-900 dark:text-white">{rider.name}</span><span className="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400">{rider.phone || "No phone number"}</span></span><span className={`shrink-0 text-xs font-medium ${rider.busy ? "text-gray-500" : "text-success-700 dark:text-success-400"}`}>{rider.busy ? "On an active delivery" : selected ? "Selected" : "Available"}</span></button>; }) : <p className="px-3 py-8 text-center text-sm text-gray-500">No riders match that search.</p>}</div><div className="flex flex-col-reverse gap-2 border-t border-gray-100 p-4 sm:flex-row sm:justify-end dark:border-gray-800"><Button disabled={busy} onClick={() => setAssignOpen(false)} size="sm" variant="outline">Cancel</Button><Button disabled={busy || !selectedRider || selectedRider.busy} onClick={async () => { const assigned = await request(`/api/v1/admin/orders/${encodeURIComponent(orderNumber)}/assign`, "POST", { riderId }); if (assigned) setAssignOpen(false); }} size="sm">{busy ? "Assigning…" : "Assign order"}</Button></div></section></div> : null}
+      {assignOpen
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[160] grid place-items-center bg-gray-950/45 p-4"
+              role="presentation"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget && !busy) setAssignOpen(false);
+              }}
+            >
+              <section
+                aria-labelledby={`assign-rider-title-${orderNumber}`}
+                aria-modal="true"
+                className="w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900"
+                ref={dialogRef}
+                role="dialog"
+              >
+                <div className="border-b border-gray-100 p-4 dark:border-gray-800">
+                  <h2 className="text-base font-semibold text-gray-900 dark:text-white" id={`assign-rider-title-${orderNumber}`}>
+                    Assign rider to {orderNumber}
+                  </h2>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    Riders with an active delivery can’t take another order.
+                  </p>
+                  <label className="relative mt-4 block">
+                    <span className="sr-only">Search riders by name or phone</span>
+                    <SearchLgIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
+                    <input
+                      autoFocus
+                      className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-9 pr-3 text-sm text-gray-800 outline-none placeholder:text-gray-400 focus:border-brand-400 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                      onChange={(event) => setRiderQuery(event.target.value)}
+                      placeholder="Search name or phone"
+                      value={riderQuery}
+                    />
+                  </label>
+                  {error ? <p className="mt-3 text-sm text-error-600" role="alert">{error}</p> : null}
+                </div>
+                <div className="max-h-64 overflow-y-auto p-2">
+                  {filteredRiders.length ? filteredRiders.map((rider) => {
+                    const selected = rider.id === riderId;
+                    return (
+                      <button
+                        aria-pressed={selected}
+                        className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left transition ${rider.busy ? "cursor-not-allowed opacity-55" : selected ? "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "hover:bg-gray-50 dark:hover:bg-white/5"}`}
+                        disabled={rider.busy || busy}
+                        key={rider.id}
+                        onClick={() => setRiderId(rider.id)}
+                        type="button"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium text-gray-900 dark:text-white">{rider.name}</span>
+                          <span className="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400">{rider.phone || "No phone number"}</span>
+                        </span>
+                        <span className={`shrink-0 text-xs font-medium ${rider.busy ? "text-gray-500" : "text-success-700 dark:text-success-400"}`}>
+                          {rider.busy ? "On an active delivery" : selected ? "Selected" : "Available"}
+                        </span>
+                      </button>
+                    );
+                  }) : <p className="px-3 py-8 text-center text-sm text-gray-500">No riders match that search.</p>}
+                </div>
+                <div className="flex flex-col-reverse gap-2 border-t border-gray-100 p-4 sm:flex-row sm:justify-end dark:border-gray-800">
+                  <Button disabled={busy} onClick={() => setAssignOpen(false)} size="sm" variant="outline">Cancel</Button>
+                  <Button
+                    disabled={busy || !selectedRider || selectedRider.busy}
+                    onClick={async () => {
+                      const assigned = await request(`/api/v1/admin/orders/${encodeURIComponent(orderNumber)}/assign`, "POST", { riderId });
+                      if (assigned) {
+                        setAssignOpen(false);
+                        showToast({ title: "Rider assigned", description: `${selectedRider?.name} assigned to ${orderNumber}.`, tone: "success" });
+                      }
+                    }}
+                    size="sm"
+                  >
+                    {busy ? "Assigning…" : "Assign order"}
+                  </Button>
+                </div>
+              </section>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 
