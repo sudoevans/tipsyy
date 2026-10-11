@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     // independent payment-recovery work from running.
     const tasks = await Promise.all([
       runMaintenanceTask("expire_reservations", expireReservations),
-      runMaintenanceTask("dispatch_notifications", () => dispatchPendingNotifications(2)),
+      runMaintenanceTask("dispatch_notifications", () => dispatchPendingNotifications(8)),
       runMaintenanceTask("payment_investigations", () => processOpenPaymentInvestigations(1)),
       runMaintenanceTask("stk_status_checks", () => reconcilePendingStkAttempts(1)),
       runMaintenanceTask("mpesa_callback_retries", () => retryUnprocessedMpesaCallbacks(5)),

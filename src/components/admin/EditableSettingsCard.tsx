@@ -51,7 +51,7 @@ export default function EditableSettingsCard({ title, description, children, onS
     setActivity("testing");
     setError("");
     try { await onTest(); showToast({ title: "Telegram connected", description: "A test message was sent.", tone: "success" }); }
-    catch { setError("Telegram test failed. Check the saved chat ID and bot token."); }
+    catch (error) { setError(error instanceof Error && error.message.startsWith("Telegram ") ? error.message : "Telegram test failed. Check the saved chat ID and bot token."); }
     finally { busy.current = false; setActivity(null); }
   }
 
