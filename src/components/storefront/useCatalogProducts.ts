@@ -26,7 +26,7 @@ export default function useCatalogProducts() {
       .then(async (response) => {
         const payload = await response.json() as { data?: CatalogRow[]; error?: { message?: string } };
         if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? "The catalog could not be loaded.");
-        setProducts(payload.data.map((row) => ({
+        setProducts(payload.data.map<StoreProduct>((row) => ({
           id: row.slug as ProductId,
           name: row.name,
           category: row.category_slug as CategoryId,
