@@ -8,7 +8,7 @@ import {
 } from "@untitledui/icons-react/outline";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { addInventoryStock, setInventoryStorefrontEnabled } from "@/app/[locale]/(admin)/admin/actions";
+import { addInventoryStock, adjustInventoryStock, setInventoryStorefrontEnabled } from "@/app/[locale]/(admin)/admin/actions";
 import { useAdminToast } from "@/components/admin/AdminToast";
 import AdminPagination from "@/components/admin/AdminPagination";
 import AdminTableActionsMenu from "@/components/admin/AdminTableActionsMenu";
@@ -70,6 +70,7 @@ export default function InventoryCatalog({
   const queryParam = params.get("q") ?? "";
   const [query, setQuery] = useState(queryParam);
   const [addingStock, setAddingStock] = useState<InventoryItem | null>(null);
+  const [editingStock, setEditingStock] = useState<InventoryItem | null>(null);
   const { showToast } = useAdminToast();
   const [visibility, setVisibility] = useState<Record<string, boolean>>({});
   const pendingVisibility = useRef(new Set<string>());
@@ -254,6 +255,7 @@ export default function InventoryCatalog({
                     <InventoryActions
                       item={item}
                       onAddStock={() => setAddingStock(item)}
+                      onEditStock={() => setEditingStock(item)}
                       onToggleStorefront={() => toggleStorefront(item)}
                     />
                   </td>
@@ -284,6 +286,7 @@ export default function InventoryCatalog({
                   item={item}
                   includeAddStock={false}
                   onAddStock={() => setAddingStock(item)}
+                  onEditStock={() => setEditingStock(item)}
                   onToggleStorefront={() => toggleStorefront(item)}
                 />
               </div>
@@ -305,6 +308,7 @@ export default function InventoryCatalog({
           pageSize={pageSize}
         />
       </section>
+      {editingStock ? <AddStockDialog item={editingStock} editing onClose={() => setEditingStock(null)} /> : null}
       {addingStock ? (
         <AddStockDialog item={addingStock} onClose={() => setAddingStock(null)} />
       ) : null}
@@ -367,11 +371,13 @@ function InventoryActions({
   item,
   includeAddStock = true,
   onAddStock,
+  onEditStock,
   onToggleStorefront,
 }: {
   item: InventoryItem;
   includeAddStock?: boolean;
   onAddStock: () => void;
+  onEditStock: () => void;
   onToggleStorefront: () => void;
 }) {
   return (
@@ -380,6 +386,7 @@ function InventoryActions({
       width={200}
       items={[
         ...(includeAddStock ? [{ label: "Add stock", icon: <PlusIcon className="size-4" />, onSelect: onAddStock }] : []),
+        { label: "Edit stock", onSelect: onEditStock },
         { label: item.storefrontEnabled ? "Hide from storefront" : "Show on storefront", onSelect: onToggleStorefront },
         { label: "View product", href: `/admin/products/${item.productId}` },
       ]}
@@ -389,22 +396,26 @@ function InventoryActions({
 
 function AddStockDialog({
   item,
+  editing = false,
   onClose,
 }: {
   item: InventoryItem;
+  editing?: boolean;
   onClose: () => void;
 }) {
   const router = useRouter();
   const { showToast } = useAdminToast();
   const [pending, startTransition] = useTransition();
-  const [quantity, setQuantity] = useState("");
+  const [quantity, setQuantity] = useState(editing ? String(item.inStock) : "");
+  const [reason, setReason] = useState("");
   const save = () =>
     startTransition(async () => {
       try {
         const formData = new FormData();
         formData.set("quantity", quantity);
-        await addInventoryStock(item.variantId, formData);
-        showToast({ title: "Stock added", description: `${quantity} added to ${item.name} · ${item.label}.`, tone: "success" });
+        formData.set("reason", reason);
+        await (editing ? adjustInventoryStock : addInventoryStock)(item.variantId, formData);
+        showToast({ title: editing ? "Stock updated" : "Stock added", description: editing ? `${item.name} stock set to ${quantity}.` : `${quantity} added to ${item.name} · ${item.label}.`, tone: "success" });
         onClose();
         router.refresh();
       } catch (error) {
@@ -432,7 +443,7 @@ function AddStockDialog({
               id="add-stock-title"
               className="text-lg font-semibold text-gray-800 dark:text-white"
             >
-              Add stock
+              {editing ? "Edit stock" : "Add stock"}
             </h2>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               {item.name} · {item.label}
@@ -449,21 +460,22 @@ function AddStockDialog({
         </div>
         <div className="space-y-4 p-4 sm:p-5">
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Quantity to add
+            {editing ? "Actual stock quantity" : "Quantity to add"}
             <input
               autoFocus
               inputMode="numeric"
               type="number"
-              min={1}
+              min={editing ? item.reserved : 1}
               step={1}
               value={quantity}
               onChange={(event) => setQuantity(event.target.value)}
               className="field mt-1.5 h-12 text-base"
             />
           </label>
+          {editing ? <label className="block text-sm font-medium text-gray-700">Reason for correction<input className="field mt-1.5" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} /><span className="text-xs text-gray-500">{item.reserved} units reserved; reservations are not changed.</span></label> : null}
           <div className="grid grid-cols-2 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.03]">
             <div><p className="text-xs text-gray-500 dark:text-gray-400">Current in stock</p><p className="mt-1 text-lg font-semibold text-gray-800 dark:text-white">{item.inStock}</p></div>
-            <div><p className="text-xs text-gray-500 dark:text-gray-400">After restock</p><p className="mt-1 text-lg font-semibold text-brand-600">{item.inStock + (Number(quantity) || 0)}</p></div>
+            <div><p className="text-xs text-gray-500 dark:text-gray-400">After change</p><p className="mt-1 text-lg font-semibold text-brand-600">{(editing ? 0 : item.inStock) + (Number(quantity) || 0)}</p></div>
           </div>
         </div>
         <div className="flex gap-2 border-t border-gray-100 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:justify-end sm:p-5 dark:border-gray-800">
@@ -478,10 +490,10 @@ function AddStockDialog({
           <button
             type="button"
             onClick={save}
-            disabled={pending || !Number.isInteger(Number(quantity)) || Number(quantity) < 1}
+            disabled={pending || quantity === "" || !Number.isInteger(Number(quantity)) || Number(quantity) < (editing ? item.reserved : 1) || (editing && reason.trim().length < 3)}
             className="h-11 flex-1 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white disabled:opacity-50 sm:flex-none"
           >
-            {pending ? "Adding…" : "Add stock"}
+            {pending ? "Saving…" : editing ? "Save stock" : "Add stock"}
           </button>
         </div>
       </div>
