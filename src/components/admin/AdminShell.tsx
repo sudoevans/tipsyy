@@ -9,7 +9,7 @@ export default function AdminShell({ children, displayName, role }: { children: 
   const { isExpanded, isHovered, isMobileOpen } = useSidebar();
   const margin = isMobileOpen ? "ml-0" : isExpanded || isHovered ? "xl:ml-[290px]" : "xl:ml-[90px]";
   return (
-    <div className="min-h-screen xl:flex">
+    <div className="admin-typography min-h-screen xl:flex">
       <AppSidebar displayName={displayName} role={role} />
       <Backdrop />
       <div className={`min-w-0 flex-1 transition-all duration-300 ease-in-out ${margin}`}>

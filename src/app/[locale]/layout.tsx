@@ -5,6 +5,7 @@ import WhatsAppSupport from "@/components/storefront/WhatsAppSupport";
 import { CustomerSessionProvider } from "@/components/storefront/CustomerSession";
 import { StorefrontToastProvider } from "@/components/storefront/StorefrontToast";
 import { GeistSans } from "geist/font/sans";
+import { Outfit } from "next/font/google";
 import { isRtl } from "@/i18n/languages";
 import { type Locale, routing } from "@/i18n/routing";
 import "flatpickr/dist/flatpickr.css";
@@ -14,6 +15,8 @@ import { notFound } from "next/navigation";
 import "simplebar-react/dist/simplebar.min.css";
 import "swiper/css/bundle";
 import "../globals.css";
+
+const outfit = Outfit({ subsets: ["latin"], variable: "--font-admin-outfit", display: "swap", preload: false });
 
 export function generateStaticParams() {
   return routing.locales.map((locale) => ({ locale }));
@@ -35,7 +38,7 @@ export default async function RootLayout({
   setRequestLocale(locale);
 
   return (
-    <html className={GeistSans.variable} lang={locale} dir={isRtl(locale as Locale) ? "rtl" : "ltr"}>
+    <html className={`${GeistSans.variable} ${outfit.variable}`} lang={locale} dir={isRtl(locale as Locale) ? "rtl" : "ltr"}>
       <body className="font-geist font-medium dark:bg-gray-900">
         <AgeGate />
         <NextIntlClientProvider>

@@ -1218,6 +1218,15 @@ pre[class*="language-"].line-numbers {
   font-family: var(--font-geist-sans), Geist, sans-serif !important;
 }
 
+/* Include body-level portals (menus, notifications and toasts) in admin typography. */
+body:has(.admin-typography) {
+  font-family: var(--font-admin-outfit), ui-sans-serif, sans-serif;
+}
+
+body:has(.admin-typography) [data-sonner-toast] {
+  font-family: var(--font-admin-outfit), ui-sans-serif, sans-serif !important;
+}
+
 .feedback-toast[class*="right-"] {
   animation-name: soft-surface-enter;
 }
