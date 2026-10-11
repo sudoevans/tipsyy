@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Table,
   TableBody,
@@ -21,6 +22,7 @@ export default function BasicTableOne({
   pageSize = 10,
   footer,
   noHorizontalScroll = false,
+  rowHrefs,
 }: {
   title?: string;
   description?: string;
@@ -32,8 +34,15 @@ export default function BasicTableOne({
   pageSize?: number;
   footer?: ReactNode;
   noHorizontalScroll?: boolean;
+  rowHrefs?: string[];
 }) {
+  const router = useRouter();
   const [page, setPage] = useState(1);
+  const openRow = (event: React.MouseEvent<HTMLElement>, rowIndex: number) => {
+    if ((event.target as Element).closest("a,button,input,select,textarea,[role=button],[role=dialog]")) return;
+    const href = rowHrefs?.[(pagination ? (currentPage - 1) * pageSize : 0) + rowIndex];
+    if (href) router.push(href);
+  };
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const visibleRows = pagination
@@ -76,6 +85,7 @@ export default function BasicTableOne({
               {visibleRows.map((row, rowIndex) => (
                 <article
                   key={rowIndex}
+                  onClick={rowHrefs ? (event) => openRow(event, rowIndex) : undefined}
                   className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900"
                 >
                   {row[0] !== undefined ? (
@@ -129,7 +139,7 @@ export default function BasicTableOne({
                 </TableHeader>
                 <TableBody className="divide-y divide-gray-100 dark:divide-white/5">
                   {visibleRows.map((row, rowIndex) => (
-                    <TableRow key={rowIndex}>
+                    <TableRow key={rowIndex} className={rowHrefs ? "cursor-pointer hover:bg-gray-50" : undefined} onClick={rowHrefs ? (event) => openRow(event, rowIndex) : undefined}>
                       {row.map((cell, cellIndex) => (
                         <TableCell
                           key={cellIndex}

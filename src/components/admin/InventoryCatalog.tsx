@@ -54,7 +54,7 @@ const filters = [
 ];
 
 export default function InventoryCatalog({
-  items,
+  items: serverItems,
   catalogue,
   health,
   sort,
@@ -71,6 +71,25 @@ export default function InventoryCatalog({
   const [query, setQuery] = useState(queryParam);
   const [addingStock, setAddingStock] = useState<InventoryItem | null>(null);
   const { showToast } = useAdminToast();
+  const [visibility, setVisibility] = useState<Record<string, boolean>>({});
+  const pendingVisibility = useRef(new Set<string>());
+  const items = serverItems.map((item) => ({ ...item, storefrontEnabled: visibility[item.variantId] ?? item.storefrontEnabled }));
+  const toggleStorefront = async (item: InventoryItem) => {
+    if (pendingVisibility.current.has(item.variantId)) return;
+    pendingVisibility.current.add(item.variantId);
+    const enabled = !item.storefrontEnabled;
+    setVisibility((current) => ({ ...current, [item.variantId]: enabled }));
+    try {
+      await setInventoryStorefrontEnabled(item.variantId, enabled);
+      showToast({ title: enabled ? "Item visible on storefront" : "Item hidden from storefront", tone: "success" });
+      router.refresh();
+    } catch {
+      setVisibility((current) => ({ ...current, [item.variantId]: item.storefrontEnabled }));
+      showToast({ title: "Could not update storefront visibility", description: "Please try again.", tone: "error" });
+    } finally {
+      pendingVisibility.current.delete(item.variantId);
+    }
+  };
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRoot = useRef<HTMLDivElement>(null);
   const update = useCallback(
@@ -235,15 +254,7 @@ export default function InventoryCatalog({
                     <InventoryActions
                       item={item}
                       onAddStock={() => setAddingStock(item)}
-                      onToggleStorefront={async () => {
-                        try {
-                          await setInventoryStorefrontEnabled(item.variantId, !item.storefrontEnabled);
-                          showToast({ title: item.storefrontEnabled ? "Item hidden from storefront" : "Item visible on storefront", tone: "success" });
-                          router.refresh();
-                        } catch (error) {
-                          showToast({ title: "Could not update storefront visibility", description: error instanceof Error ? error.message : "Please try again.", tone: "error" });
-                        }
-                      }}
+                      onToggleStorefront={() => toggleStorefront(item)}
                     />
                   </td>
                 </tr>
@@ -273,15 +284,7 @@ export default function InventoryCatalog({
                   item={item}
                   includeAddStock={false}
                   onAddStock={() => setAddingStock(item)}
-                  onToggleStorefront={async () => {
-                    try {
-                      await setInventoryStorefrontEnabled(item.variantId, !item.storefrontEnabled);
-                      showToast({ title: item.storefrontEnabled ? "Item hidden from storefront" : "Item visible on storefront", tone: "success" });
-                      router.refresh();
-                    } catch (error) {
-                      showToast({ title: "Could not update storefront visibility", description: error instanceof Error ? error.message : "Please try again.", tone: "error" });
-                    }
-                  }}
+                  onToggleStorefront={() => toggleStorefront(item)}
                 />
               </div>
               <button type="button" onClick={() => setAddingStock(item)} className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-600">

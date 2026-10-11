@@ -82,6 +82,8 @@ export const sql = new Proxy(sqlProxy, {
  * back to the local DATABASE_URL.
  */
 export type Database = postgres.Sql;
+// Capture the invocation client before returning a streaming response.
+export function getRequestDatabase(): Database { return getDatabaseClient(); }
 export type Transaction = postgres.TransactionSql;
 
 export async function withTransaction<T>(work: (tx: Transaction) => Promise<T>): Promise<T> {

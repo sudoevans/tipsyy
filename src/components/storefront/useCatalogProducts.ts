@@ -19,6 +19,14 @@ export default function useCatalogProducts() {
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") setRefreshKey((current) => current + 1); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -26,6 +34,7 @@ export default function useCatalogProducts() {
       .then(async (response) => {
         const payload = await response.json() as { data?: CatalogRow[]; error?: { message?: string } };
         if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? "The catalog could not be loaded.");
+        setError("");
         setProducts(payload.data.map<StoreProduct>((row) => ({
           id: row.slug as ProductId,
           name: row.name,
@@ -45,7 +54,7 @@ export default function useCatalogProducts() {
       })
       .finally(() => setIsLoading(false));
     return () => controller.abort();
-  }, []);
+  }, [refreshKey]);
 
   return { error, isLoading, products };
 }

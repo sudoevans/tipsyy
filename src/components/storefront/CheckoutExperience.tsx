@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import BeverageImage from "./BeverageImage";
 import BrandLogo from "./BrandLogo";
@@ -526,98 +526,112 @@ export default function CheckoutExperience() {
     (currentMobileSummaryPage + 1) * MOBILE_SUMMARY_PAGE_SIZE,
   );
 
+  const applySnapshot = useCallback((snapshot: OrderSnapshot) => {
+    setOrderSnapshot(snapshot);
+    if (snapshot.payment.status === "SUCCEEDED") {
+      setPaymentReceipt({
+        code: snapshot.payment.receipt ?? "—",
+        paidAt: snapshot.payment.paidAt
+          ? new Intl.DateTimeFormat("en-KE", {
+              dateStyle: "medium",
+              timeStyle: "short",
+            }).format(new Date(snapshot.payment.paidAt))
+          : "—",
+      });
+      clearCartForCheckout();
+      window.localStorage.removeItem(CHECKOUT_SESSION_KEY);
+      setCart({});
+      setStep("complete");
+      setToast({
+        title: "Payment confirmed",
+        description: ["CANCELLED", "PAYMENT_CANCELLED"].includes(snapshot.status)
+          ? `Payment received for ${snapshot.orderNumber}; the cancelled order was not reopened and needs a refund review.`
+          : snapshot.status === "PAID_REQUIRES_REVIEW"
+            ? `Payment confirmed for ${snapshot.orderNumber}; item availability needs review.`
+            : `Order ${snapshot.orderNumber} is confirmed.`,
+      });
+      return true;
+    }
+    const failure = paymentFailureKind(snapshot);
+    if (failure === "reconciling") {
+      setPaymentFailure(failure);
+      return false;
+    }
+    if (failure) {
+      setPaymentFailure(failure);
+      setStep("failed");
+      setToast({
+        title:
+          failure === "cancelled"
+            ? "Payment cancelled"
+            : "Payment wasn’t completed",
+        description: "Your reserved stock has been released.",
+      });
+      return true;
+    }
+    setPaymentFailure(null);
+    return false;
+  }, []);
+
   useEffect(() => {
     if (step !== "waiting" || !checkoutSession) return;
     let cancelled = false;
-    let timeout: number | undefined;
-    const applySnapshot = (snapshot: OrderSnapshot) => {
-      setOrderSnapshot(snapshot);
-      if (snapshot.payment.status === "SUCCEEDED") {
-        setPaymentReceipt({
-          code: snapshot.payment.receipt ?? "—",
-          paidAt: snapshot.payment.paidAt
-            ? new Intl.DateTimeFormat("en-KE", {
-                dateStyle: "medium",
-                timeStyle: "short",
-              }).format(new Date(snapshot.payment.paidAt))
-            : "—",
-        });
-        clearCartForCheckout();
-        window.localStorage.removeItem(CHECKOUT_SESSION_KEY);
-        setCart({});
-        setStep("complete");
-        setToast({
-          title: "Payment confirmed",
-          description: ["CANCELLED", "PAYMENT_CANCELLED"].includes(snapshot.status)
-            ? `Payment received for ${snapshot.orderNumber}; the cancelled order was not reopened and needs a refund review.`
-            : snapshot.status === "PAID_REQUIRES_REVIEW"
-              ? `Payment confirmed for ${snapshot.orderNumber}; item availability needs review.`
-              : `Order ${snapshot.orderNumber} is confirmed.`,
-        });
-        return true;
-      }
-      const failure = paymentFailureKind(snapshot);
-      if (failure === "reconciling") {
-        setPaymentFailure(failure);
-        return false;
-      }
-      if (failure) {
-        setPaymentFailure(failure);
-        setStep("failed");
-        setToast({
-          title:
-            failure === "cancelled"
-              ? "Payment cancelled"
-              : "Payment wasn’t completed",
-          description: "Your reserved stock has been released.",
-        });
-        return true;
-      }
-      setPaymentFailure(null);
-      return false;
-    };
-    const poll = async () => {
+    const streamController = new AbortController();
+    const observeCallbacks = async () => {
       try {
-        let snapshot = await responseData<OrderSnapshot>(
-          await fetch(
-            `/api/v1/orders/${encodeURIComponent(checkoutSession.orderNumber)}`,
-            {
-              headers: {
-                Authorization: `Bearer ${checkoutSession.accessToken}`,
-              },
-              cache: "no-store",
-            },
-          ),
-        );
-        if (cancelled) return;
-        if (applySnapshot(snapshot)) return;
-        if (snapshot.payment.status === "PENDING") {
-          snapshot = await responseData<OrderSnapshot>(
-            await fetch("/api/v1/payments/mpesa/status", {
+        const response = await fetch("/api/v1/orders/" + encodeURIComponent(checkoutSession.orderNumber) + "/events", {
+          headers: { Authorization: "Bearer " + checkoutSession.accessToken },
+          cache: "no-store", signal: streamController.signal,
+        });
+        if (!response.ok || !response.body) return;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        try {
+          while (!cancelled) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let boundary: number;
+            while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+              const event = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              if (!event.startsWith("data: ")) continue;
+              if (!cancelled && applySnapshot(JSON.parse(event.slice(6)) as OrderSnapshot)) return;
+            }
+          }
+        } finally { await reader.cancel().catch(() => undefined); }
+      } catch { /* The single delayed status request remains the fallback. */ }
+    };
+    const check = async (queryProvider = false) => {
+      try {
+        const checkKey = `tipsy:stk-checked:${checkoutSession.orderNumber}:${checkoutSession.paymentInitiatedAt}`;
+        const useProvider = queryProvider && !window.sessionStorage.getItem(checkKey);
+        if (useProvider) window.sessionStorage.setItem(checkKey, "1");
+        const response = useProvider
+          ? await fetch("/api/v1/payments/mpesa/status", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                orderNumber: checkoutSession.orderNumber,
-                accessToken: checkoutSession.accessToken,
-              }),
-              cache: "no-store",
-            }),
-          );
-          if (cancelled || applySnapshot(snapshot)) return;
-        }
+              body: JSON.stringify({ orderNumber: checkoutSession.orderNumber, accessToken: checkoutSession.accessToken }),
+              cache: "no-store", signal: AbortSignal.timeout(30_000),
+            })
+          : await fetch(`/api/v1/orders/${encodeURIComponent(checkoutSession.orderNumber)}`, {
+              headers: { Authorization: `Bearer ${checkoutSession.accessToken}` },
+              cache: "no-store", signal: AbortSignal.timeout(15_000),
+            });
+        const snapshot = await responseData<OrderSnapshot>(response);
+        if (cancelled || applySnapshot(snapshot)) return;
       } catch (error) {
         if (!cancelled)
           setToast({
-            title: "Still checking payment",
+            title: "Payment confirmation unavailable",
             description:
               error instanceof Error
                 ? error.message
-                : "We’ll try again shortly.",
+                : "If you paid, enter your M-Pesa receipt or contact support. Don’t pay again.",
           });
       }
-      if (!cancelled) {
-        timeout = window.setTimeout(poll, 15_000);
-      }
+      if (!cancelled && queryProvider) setIsPaymentStillWaiting(true);
     };
     const initiatedAt = checkoutSession.paymentInitiatedAt
       ? new Date(checkoutSession.paymentInitiatedAt).getTime()
@@ -626,12 +640,19 @@ export default function CheckoutExperience() {
       0,
       30_000 - (Date.now() - initiatedAt),
     );
-    timeout = window.setTimeout(() => void poll(), remainingCallbackWait);
+    void observeCallbacks();
+    const timeout = window.setTimeout(() => void check(true), remainingCallbackWait);
+    const onVisible = () => { if (document.visibilityState === "visible") void check(); };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
+      streamController.abort();
       if (timeout) window.clearTimeout(timeout);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [checkoutSession, step]);
+  }, [checkoutSession, step, applySnapshot]);
 
   useEffect(() => {
     if (step !== "waiting") return;
@@ -838,6 +859,7 @@ export default function CheckoutExperience() {
 
   const reportPaymentIssue = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isCheckingCode) return;
     const code = confirmationCode.replace(/\s/g, "").toUpperCase();
     if (!/^[A-Z0-9]{8,20}$/.test(code)) {
       setConfirmationCodeError(
@@ -849,7 +871,7 @@ export default function CheckoutExperience() {
     if (!checkoutSession) return;
     setIsCheckingCode(true);
     try {
-      await responseData<{ id: string; status: string }>(
+      const result = await responseData<{ status: string; order: OrderSnapshot }>(
         await fetch("/api/v1/payments/mpesa/report", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -860,8 +882,13 @@ export default function CheckoutExperience() {
           }),
         }),
       );
+      if (result.order.payment.status === "SUCCEEDED") {
+        applySnapshot(result.order);
+        setIsIssueOpen(false);
+        return;
+      }
       setToast({
-        title: "Payment reported",
+        title: "Payment needs verification",
         description:
           "Our support team will review the M-Pesa receipt for this order.",
       });
@@ -877,6 +904,58 @@ export default function CheckoutExperience() {
       setIsCheckingCode(false);
     }
   };
+
+  const refreshOrderConfirmation = async () => {
+    if (!checkoutSession || isCheckingCode) return;
+    setIsCheckingCode(true);
+    try {
+      const snapshot = await responseData<OrderSnapshot>(await fetch(`/api/v1/orders/${encodeURIComponent(checkoutSession.orderNumber)}`, {
+        headers: { Authorization: `Bearer ${checkoutSession.accessToken}` }, cache: "no-store", signal: AbortSignal.timeout(15_000),
+      }));
+      if (!applySnapshot(snapshot)) setToast({ title: "Payment not confirmed yet", description: "Enter your receipt for verification. Don’t pay again if you were charged." });
+    } catch { setToast({ title: "Couldn’t check confirmation", description: "Try again or contact support with your order number." }); }
+    finally { setIsCheckingCode(false); }
+  };
+
+  const receiptForm = () => (
+  <form
+    className="mt-6 text-left"
+    onSubmit={reportPaymentIssue}
+  >
+    <p className="mb-4 text-sm leading-5 text-tipsy-muted">
+      If you approved the prompt and received an M-Pesa message,
+      enter its receipt code. We’ll verify it against this order.
+      If it cannot be verified, support will review it.
+    </p>
+    <label className="grid gap-2 text-[13px] font-semibold">
+      M-Pesa receipt code
+      <input
+        autoCapitalize="characters"
+        className="h-11 rounded-xl border border-tipsy-line bg-white px-3.5 text-base font-normal tracking-[0.08em] uppercase transition outline-none focus:border-tipsy-amber-500 focus:ring-2 focus:ring-tipsy-amber-100"
+        maxLength={20}
+        onChange={(event) => {
+          setConfirmationCode(event.target.value.toUpperCase());
+          setConfirmationCodeError("");
+        }}
+        placeholder="e.g. QAB12C3D4E"
+        value={confirmationCode}
+      />
+      {confirmationCodeError ? (
+        <span className="text-xs font-medium text-red-700">
+          {confirmationCodeError}
+        </span>
+      ) : null}
+    </label>
+    <button
+      className="mt-4 h-11 w-full rounded-xl bg-tipsy-ink px-4 text-sm font-bold text-white transition hover:bg-tipsy-amber-700 disabled:cursor-wait disabled:opacity-70"
+      disabled={isCheckingCode}
+      type="submit"
+    >
+      {isCheckingCode ? "Verifying payment…" : "Verify payment"}
+    </button>
+    <button className="mt-3 min-h-11 w-full text-sm font-semibold text-tipsy-muted underline disabled:opacity-60" disabled={isCheckingCode} onClick={() => void refreshOrderConfirmation()} type="button">Refresh payment confirmation</button>
+  </form>
+  );
 
   if (!isReady || isCatalogLoading)
     return <main className="min-h-screen bg-tipsy-canvas" />;
@@ -1267,16 +1346,17 @@ export default function CheckoutExperience() {
               className={`${surfaceClass} checkout-step-enter mt-9 p-6 text-center`}
             >
               <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-tipsy-surface">
-                <span className="size-5 animate-spin rounded-full border-2 border-tipsy-line border-t-tipsy-ink" />
+                {!isPaymentStillWaiting ? <span className="size-5 animate-spin rounded-full border-2 border-tipsy-line border-t-tipsy-ink" /> : <StoreIcon className="size-5" name="check" />}
               </span>
               <h1 className="mt-5 text-[30px] font-bold tracking-[-0.05em]">
-                Check your phone
+                {isPaymentStillWaiting ? "Verify your payment" : "Check your phone"}
               </h1>
               <p className="mt-3 text-[15px] leading-5 text-tipsy-muted">
                 {isPaymentStillWaiting
-                  ? "We haven’t received confirmation yet. If you already approved the prompt, please wait—don’t pay again. We’re still checking."
+                  ? "Payment is not confirmed yet. If you paid, verify your M-Pesa receipt below. Don’t pay again."
                   : "Approve or cancel the M-Pesa request on your phone. We’ll update this page as soon as Safaricom confirms your action."}
               </p>
+              {isIssueOpen || isPaymentStillWaiting ? receiptForm() : null}
               <div className="mt-6 grid gap-3">
                 <button
                   className="text-sm font-semibold underline decoration-tipsy-amber-500 decoration-2 underline-offset-4"
@@ -1789,56 +1869,21 @@ export default function CheckoutExperience() {
                 className={`${surfaceClass} mt-5 p-6 text-center sm:p-7`}
               >
                 <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-tipsy-surface text-tipsy-ink">
-                  <span className="size-5 animate-spin rounded-full border-2 border-tipsy-line border-t-tipsy-ink" />
+                  {!isPaymentStillWaiting ? <span className="size-5 animate-spin rounded-full border-2 border-tipsy-line border-t-tipsy-ink" /> : <StoreIcon className="size-5" name="check" />}
                 </span>
                 <p className="mt-4 text-sm font-semibold text-tipsy-amber-700">
                   M-Pesa payment
                 </p>
                 <h1 className="mt-1.5 text-[30px] font-bold tracking-[-0.05em]">
-                  Check your phone
+                  {isPaymentStillWaiting ? "Verify your payment" : "Check your phone"}
                 </h1>
                 <p className="mx-auto mt-2 max-w-sm text-sm leading-5 text-tipsy-muted">
                   {isPaymentStillWaiting
-                    ? "We haven’t received confirmation yet. If you already approved the prompt, please wait—don’t pay again. We’re still checking."
-                    : "Approve or cancel the M-Pesa request on your phone. This page checks the verified result automatically and is safe to reopen."}
+                    ? "Payment is not confirmed yet. If you paid, verify your M-Pesa receipt below. Don’t pay again."
+                    : "Approve or cancel the M-Pesa request on your phone. We’ll check once after 30 seconds if confirmation hasn’t arrived."}
                 </p>
-                {isIssueOpen ? (
-                  <form
-                    className="mt-6 text-left"
-                    onSubmit={reportPaymentIssue}
-                  >
-                    <p className="mb-4 text-sm leading-5 text-tipsy-muted">
-                      If you approved the prompt and received an M-Pesa message,
-                      send its receipt code to support. We will review it
-                      against this order.
-                    </p>
-                    <label className="grid gap-2 text-[13px] font-semibold">
-                      M-Pesa receipt code
-                      <input
-                        autoCapitalize="characters"
-                        className="h-11 rounded-xl border border-tipsy-line bg-white px-3.5 text-base font-normal tracking-[0.08em] uppercase transition outline-none focus:border-tipsy-amber-500 focus:ring-2 focus:ring-tipsy-amber-100"
-                        maxLength={20}
-                        onChange={(event) => {
-                          setConfirmationCode(event.target.value.toUpperCase());
-                          setConfirmationCodeError("");
-                        }}
-                        placeholder="e.g. QAB12C3D4E"
-                        value={confirmationCode}
-                      />
-                      {confirmationCodeError ? (
-                        <span className="text-xs font-medium text-red-700">
-                          {confirmationCodeError}
-                        </span>
-                      ) : null}
-                    </label>
-                    <button
-                      className="mt-4 h-11 w-full rounded-xl bg-tipsy-ink px-4 text-sm font-bold text-white transition hover:bg-tipsy-amber-700 disabled:cursor-wait disabled:opacity-70"
-                      disabled={isCheckingCode}
-                      type="submit"
-                    >
-                      {isCheckingCode ? "Sending report…" : "Report to support"}
-                    </button>
-                  </form>
+                {isIssueOpen || isPaymentStillWaiting ? (
+                  receiptForm()
                 ) : (
                   <div className="mt-6 grid gap-3">
                     <button

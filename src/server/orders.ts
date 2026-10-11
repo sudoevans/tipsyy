@@ -1,9 +1,9 @@
-import { sql } from "./db";
+import { sql, type Database } from "./db";
 import { ApiError } from "./http";
 import { hashSecret } from "./security";
 
-export async function getGuestOrder(orderNumber: string, accessToken: string) {
-  const [order] = await sql<{
+export async function getGuestOrder(orderNumber: string, accessToken: string, database: Database = sql) {
+  const [order] = await database<{
     id: string;
     order_number: string;
     status: string;
@@ -39,18 +39,18 @@ export async function getGuestOrder(orderNumber: string, accessToken: string) {
     FROM orders o
     LEFT JOIN delivery_areas da ON da.id = o.delivery_area_id
     LEFT JOIN LATERAL (
-      SELECT status, provider_receipt, paid_at FROM payments WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
+      SELECT id, status, provider_receipt, paid_at FROM payments WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
     ) p ON true
     WHERE o.order_number = ${orderNumber} AND o.access_token_hash = ${hashSecret(accessToken)}
   `;
   if (!order) throw new ApiError(404, "ORDER_NOT_FOUND", "Order not found.");
 
   const [items, events] = await Promise.all([
-    sql`
+    database`
       SELECT product_name, sku, size_label, image_url, quantity, unit_price_minor, line_total_minor
       FROM order_items WHERE order_id = ${order.id} ORDER BY created_at
     `,
-    sql`
+    database`
       SELECT from_status, to_status, source, note, metadata, created_at
       FROM order_events WHERE order_id = ${order.id} ORDER BY created_at
     `,

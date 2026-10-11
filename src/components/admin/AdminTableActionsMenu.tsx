@@ -52,7 +52,10 @@ export default function AdminTableActionsMenu({
         triggerRef.current?.focus();
       }
     };
-    const onViewportChange = () => close();
+    const onViewportChange = (event: Event) => {
+      if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
+      close();
+    };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("scroll", onViewportChange, true);
@@ -92,7 +95,7 @@ export default function AdminTableActionsMenu({
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={Boolean(position)}
-        onClick={toggle}
+        onClick={(event) => { event.stopPropagation(); toggle(); }}
         className="inline-flex size-9 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5 dark:hover:text-white"
       >
         <DotsVerticalIcon className="size-4" />
@@ -101,6 +104,8 @@ export default function AdminTableActionsMenu({
         ? createPortal(
             <div
               ref={menuRef}
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
               role="menu"
               aria-label={label}
               className="fixed z-[160] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-900"

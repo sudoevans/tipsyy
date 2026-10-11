@@ -53,7 +53,8 @@ export default async function InventoryPage({
     FROM inventory i
     JOIN product_variants v ON v.id = i.variant_id
     JOIN products p ON p.id = v.product_id
-    WHERE (${q} = '' OR p.name ILIKE ${`%${q}%`} OR v.sku ILIKE ${`%${q}%`} OR v.label ILIKE ${`%${q}%`})
+    WHERE p.active = true
+      AND (${q} = '' OR p.name ILIKE ${`%${q}%`} OR v.sku ILIKE ${`%${q}%`} OR v.label ILIKE ${`%${q}%`})
       AND (${health} = 'all'
         OR (${health} = 'out' AND i.on_hand_quantity - i.reserved_quantity <= 0)
         OR (${health} = 'low' AND i.on_hand_quantity - i.reserved_quantity > 0 AND i.on_hand_quantity - i.reserved_quantity <= i.low_stock_threshold)
@@ -82,7 +83,8 @@ export default async function InventoryPage({
       FROM inventory i
       JOIN product_variants v ON v.id = i.variant_id
       JOIN products p ON p.id = v.product_id
-      WHERE (${q} = '' OR p.name ILIKE ${`%${q}%`} OR v.sku ILIKE ${`%${q}%`} OR v.label ILIKE ${`%${q}%`})
+      WHERE p.active = true
+        AND (${q} = '' OR p.name ILIKE ${`%${q}%`} OR v.sku ILIKE ${`%${q}%`} OR v.label ILIKE ${`%${q}%`})
         AND (${health} = 'all'
           OR (${health} = 'out' AND i.on_hand_quantity - i.reserved_quantity <= 0)
           OR (${health} = 'low' AND i.on_hand_quantity - i.reserved_quantity > 0 AND i.on_hand_quantity - i.reserved_quantity <= i.low_stock_threshold)
