@@ -11,7 +11,7 @@ const money = new Intl.NumberFormat("en-KE", {
   currency: "KES",
   maximumFractionDigits: 0,
 });
-const date = new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" });
+const date = new Intl.DateTimeFormat("en-KE", { dateStyle: "medium", timeZone: "Africa/Nairobi" });
 export default async function CustomersPage({
   searchParams,
 }: {

@@ -10,7 +10,7 @@ import { evaluateInventoryNotifications } from "@/server/admin-notifications";
 import { hashPassword } from "@/server/admin-auth";
 import { redirect } from "next/navigation";
 import { sendTelegramMessage, TELEGRAM_EVENTS } from "@/server/notifications";
-import { encryptPlatformSecret } from "@/server/security";
+import { encryptPlatformSecret, normalizeKenyanPhone } from "@/server/security";
 import { getServerEnv } from "@/server/env";
 
 async function requireAdministrator() {
@@ -537,7 +537,7 @@ export async function createRider(formData: FormData) {
   const input = z
     .object({
       name: z.string().min(2),
-      phone: z.string().min(9),
+      phone: z.string().transform(normalizeKenyanPhone),
       vehicleType: z.string().min(2),
       registration: z.string().max(40),
     })
@@ -547,13 +547,17 @@ export async function createRider(formData: FormData) {
       vehicleType: text(formData, "vehicleType"),
       registration: text(formData, "registration"),
     });
-  const [user] = await sql<
+  await sql.begin(async (tx) => {
+  const [existing] = await tx<{ role: string }[]>`SELECT role::text FROM users WHERE phone=${input.phone} FOR UPDATE`;
+  if (existing && !["CUSTOMER", "RIDER"].includes(existing.role)) throw new Error("This phone belongs to a staff account. Use a different driver number.");
+  const [user] = await tx<
     { id: string }[]
   >`INSERT INTO users (phone, display_name, role, status) VALUES (${input.phone}, ${input.name}, 'RIDER', 'ACTIVE') ON CONFLICT (phone) DO UPDATE SET display_name=EXCLUDED.display_name, role='RIDER', status='ACTIVE', updated_at=now() RETURNING id`;
-  const [rider] = await sql<
+  const [rider] = await tx<
     { id: string }[]
   >`INSERT INTO riders (user_id, availability, vehicle_type, vehicle_registration) VALUES (${user.id}, 'OFFLINE', ${input.vehicleType}, ${input.registration || null}) ON CONFLICT (user_id) DO UPDATE SET vehicle_type=EXCLUDED.vehicle_type, vehicle_registration=EXCLUDED.vehicle_registration, updated_at=now() RETURNING id`;
-  await audit(admin.id, "rider.onboarded", "rider", rider.id);
+  await tx`INSERT INTO admin_activity_logs(actor_user_id,action,entity_type,entity_id) VALUES(${admin.id},'rider.onboarded','rider',${rider.id})`;
+  });
   revalidatePath("/admin/riders");
   revalidatePath("/admin/delivery");
 }
@@ -583,12 +587,16 @@ export async function recordDriverPayout(formData: FormData) {
       periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       reference: z.string().max(80),
+      amount: z.coerce.number().positive().finite(),
+      requestId: z.string().uuid(),
     })
     .parse({
       riderId: formData.get("riderId"),
       periodStart: text(formData, "periodStart"),
       periodEnd: text(formData, "periodEnd"),
       reference: text(formData, "reference"),
+      amount: formData.get("amount"),
+      requestId: formData.get("requestId"),
     });
   const periodStart = new Date(`${input.periodStart}T00:00:00.000Z`);
   const periodEnd = new Date(`${input.periodEnd}T00:00:00.000Z`);
@@ -608,21 +616,28 @@ export async function recordDriverPayout(formData: FormData) {
   ) {
     throw new Error("A driver payout must cover one Monday–Sunday week.");
   }
-  if (periodEnd >= currentWeekStart) {
+  if (periodStart > currentWeekStart) {
     throw new Error(
-      "A weekly payout can be recorded after its week has closed.",
+      "Payments cannot be recorded for a future week.",
     );
   }
 
   const result = await sql.begin(async (tx) => {
+    await tx`SELECT id FROM riders WHERE id=${input.riderId} FOR UPDATE`;
+    const [previous] = await tx<{ id: string; rider_id: string; amount_minor: number; reference: string }[]>`SELECT id,rider_id,amount_minor,reference FROM driver_payouts WHERE id=${input.requestId}`;
+    if (previous) {
+      if (previous.rider_id !== input.riderId || previous.amount_minor !== input.amount) throw new Error("This payment request has already been used.");
+      return { amount: previous.amount_minor, count: 0, payoutId: previous.id, reference: previous.reference };
+    }
     const assignments = await tx<{ id: string; payout_minor: number }[]>`
-      SELECT id,payout_minor
+      SELECT id,(payout_minor - COALESCE((SELECT SUM(dpi.amount_minor) FROM driver_payout_items dpi JOIN driver_payouts dp ON dp.id=dpi.payout_id WHERE dpi.assignment_id=delivery_assignments.id AND dp.status='PAID'),0))::int AS payout_minor
       FROM delivery_assignments
       WHERE rider_id = ${input.riderId}
         AND status = 'DELIVERED'
         AND payout_status = 'UNPAID'
-        AND delivered_at >= ${input.periodStart}::date
-        AND delivered_at < (${input.periodEnd}::date + INTERVAL '1 day')
+        AND delivered_at >= (${input.periodStart}::date::timestamp AT TIME ZONE 'Africa/Nairobi')
+        AND delivered_at < ((${input.periodEnd}::date + INTERVAL '1 day') AT TIME ZONE 'Africa/Nairobi')
+      ORDER BY delivered_at,id
       FOR UPDATE
     `;
     if (!assignments.length) {
@@ -630,36 +645,46 @@ export async function recordDriverPayout(formData: FormData) {
         "This payment has already been settled. Refresh the payment queue and try again.",
       );
     }
-    const amount = assignments.reduce(
+    const balance = assignments.reduce(
       (total, assignment) => total + assignment.payout_minor,
       0,
     );
+    const amount = input.amount;
+    if (!Number.isInteger(amount) || amount > balance) throw new Error("Enter a whole-shilling payment no greater than the pending balance.");
     const reference =
       input.reference ||
       `DRV-${input.periodStart.replaceAll("-", "")}-${Date.now().toString().slice(-6)}`;
     const [payout] = await tx<{ id: string }[]>`
       INSERT INTO driver_payouts (
-        rider_id,period_start,period_end,amount_minor,status,reference,paid_at,created_by
+        id,rider_id,period_start,period_end,amount_minor,status,reference,paid_at,created_by
       ) VALUES (
-        ${input.riderId},${input.periodStart}::date,${input.periodEnd}::date,
+        ${input.requestId},${input.riderId},${input.periodStart}::date,${input.periodEnd}::date,
         ${amount},'PAID',${reference},now(),${admin.id}
       )
       RETURNING id
     `;
+    let remaining = amount;
+    const settled: string[] = [];
+    let count = 0;
     for (const assignment of assignments) {
+      const allocated = Math.min(remaining, assignment.payout_minor);
+      if (allocated <= 0) continue;
       await tx`
         INSERT INTO driver_payout_items (payout_id,assignment_id,amount_minor)
-        VALUES (${payout.id},${assignment.id},${assignment.payout_minor})
+        VALUES (${payout.id},${assignment.id},${allocated})
       `;
+      count += 1;
+      remaining -= allocated;
+      if (allocated === assignment.payout_minor) settled.push(assignment.id);
     }
     await tx`
       UPDATE delivery_assignments
       SET payout_status = 'PAID', payout_paid_at = now()
-      WHERE id = ANY(${assignments.map((assignment) => assignment.id)})
+      WHERE id = ANY(${settled})
     `;
     return {
       amount,
-      count: assignments.length,
+      count,
       payoutId: payout.id,
       reference,
     };

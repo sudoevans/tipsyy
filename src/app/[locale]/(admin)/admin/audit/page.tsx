@@ -62,7 +62,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   `;
 
   const rows: ReactNode[][] = logs.map((log) => [
-    log.created_at.toLocaleString("en-KE"),
+    log.created_at.toLocaleString("en-KE", { timeZone: "Africa/Nairobi" }),
     log.display_name ?? log.username ?? "System",
     humanize(log.action),
     humanize(log.entity_type),

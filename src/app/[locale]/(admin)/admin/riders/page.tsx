@@ -118,7 +118,7 @@ export default async function RidersPage({
              COUNT(da.id) FILTER (WHERE da.status = 'DELIVERED')::int AS delivered,
              COUNT(da.id) FILTER (WHERE da.status IN ('DECLINED','CANCELLED'))::int AS cancelled,
              COALESCE(SUM(da.payout_minor) FILTER (WHERE da.status = 'DELIVERED'),0)::int AS earned_minor,
-             COALESCE(SUM(da.payout_minor) FILTER (WHERE da.status = 'DELIVERED' AND da.payout_status = 'PAID'),0)::int AS paid_minor,
+             COALESCE((SELECT SUM(dp.amount_minor) FROM driver_payouts dp WHERE dp.rider_id=r.id AND dp.status='PAID'),0)::int AS paid_minor,
              COALESCE(SUM(da.payout_minor) FILTER (
                WHERE da.status = 'DELIVERED'
                  AND da.payout_status = 'UNPAID'
@@ -157,8 +157,8 @@ export default async function RidersPage({
     sql<PayoutSummaryRow[]>`
       SELECT
         COALESCE(SUM(payout_minor) FILTER (WHERE status = 'DELIVERED'),0)::int AS earned_minor,
-        COALESCE(SUM(payout_minor) FILTER (WHERE status = 'DELIVERED' AND payout_status = 'PAID'),0)::int AS paid_minor,
-        COALESCE(SUM(payout_minor) FILTER (WHERE status = 'DELIVERED' AND payout_status = 'UNPAID'),0)::int AS pending_minor,
+        COALESCE((SELECT SUM(amount_minor) FROM driver_payouts WHERE status='PAID'),0)::int AS paid_minor,
+        (COALESCE(SUM(payout_minor) FILTER (WHERE status = 'DELIVERED'),0) - COALESCE((SELECT SUM(amount_minor) FROM driver_payouts WHERE status='PAID'),0))::int AS pending_minor,
         COALESCE(SUM(payout_minor) FILTER (
           WHERE status = 'DELIVERED'
             AND payout_status = 'UNPAID'
@@ -173,9 +173,9 @@ export default async function RidersPage({
       SELECT da.rider_id,u.display_name AS rider_name,
              date_trunc('week', da.delivered_at)::date AS period_start,
              (date_trunc('week', da.delivered_at)::date + 6) AS period_end,
-             SUM(da.payout_minor)::int AS amount_minor,
+             SUM(da.payout_minor - COALESCE((SELECT SUM(dpi.amount_minor) FROM driver_payout_items dpi JOIN driver_payouts dp ON dp.id=dpi.payout_id WHERE dpi.assignment_id=da.id AND dp.status='PAID'),0))::int AS amount_minor,
              COUNT(*)::int AS delivery_count,
-             (date_trunc('week', da.delivered_at)::date + 6) < date_trunc('week', CURRENT_DATE)::date AS can_pay
+             true AS can_pay
       FROM delivery_assignments da
       JOIN riders r ON r.id = da.rider_id
       JOIN users u ON u.id = r.user_id
@@ -187,7 +187,7 @@ export default async function RidersPage({
     `,
     sql<PendingPaymentOrderRow[]>`
       SELECT da.rider_id,date_trunc('week', da.delivered_at)::date AS period_start,
-             o.order_number,o.customer_name,da.payout_minor,da.delivered_at
+             o.order_number,o.customer_name,(da.payout_minor - COALESCE((SELECT SUM(dpi.amount_minor) FROM driver_payout_items dpi JOIN driver_payouts dp ON dp.id=dpi.payout_id WHERE dpi.assignment_id=da.id AND dp.status='PAID'),0))::int AS payout_minor,da.delivered_at
       FROM delivery_assignments da
       JOIN orders o ON o.id = da.order_id
       WHERE da.status = 'DELIVERED'

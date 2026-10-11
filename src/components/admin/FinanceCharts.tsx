@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 
 const Chart = dynamic(() => import("react-apexcharts"), { ssr: false });
 const compactMoney = new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", notation: "compact", maximumFractionDigits: 1 });
-const axisDate = new Intl.DateTimeFormat("en-KE", { month: "short", day: "numeric" });
+const axisDate = new Intl.DateTimeFormat("en-KE", { month: "short", day: "numeric", timeZone: "Africa/Nairobi" });
 
 type TrendPoint = { date: string; revenue: number; expenses: number; profit: number };
 

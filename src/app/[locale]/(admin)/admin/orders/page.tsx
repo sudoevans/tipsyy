@@ -12,6 +12,7 @@ const money = new Intl.NumberFormat("en-KE", {
   maximumFractionDigits: 0,
 });
 const date = new Intl.DateTimeFormat("en-KE", {
+  timeZone: "Africa/Nairobi",
   dateStyle: "medium",
   timeStyle: "short",
 });
