@@ -2,6 +2,7 @@ import AdminOrderActions from "@/components/admin/AdminOrderActions";
 import OrderFilters from "@/components/admin/OrderFilters";
 import BasicTableOne from "@/components/tables/BasicTableOne";
 import Badge from "@/components/ui/badge/Badge";
+import Link from "next/link";
 import { sql } from "@/server/db";
 
 export const dynamic = "force-dynamic";
@@ -59,6 +60,7 @@ export default async function OrdersPage({
   return (
     <BasicTableOne
       title="Orders"
+      rowHrefs={orders.map((order) => `/admin/orders/${encodeURIComponent(order.order_number)}`)}
       actions={<OrderFilters />}
       columns={[
         "Order",
@@ -71,12 +73,13 @@ export default async function OrdersPage({
       ]}
       empty="No orders match this search."
       rows={orders.map((o) => [
-        <span
+        <Link
           key="n"
-          className="font-semibold text-gray-800 dark:text-white/90"
+          href={`/admin/orders/${encodeURIComponent(o.order_number)}`}
+          className="font-semibold text-brand-500 underline-offset-4 hover:underline"
         >
           {o.order_number}
-        </span>,
+        </Link>,
         o.customer_name,
         o.customer_phone,
         date.format(o.created_at),
