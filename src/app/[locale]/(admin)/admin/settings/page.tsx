@@ -4,6 +4,7 @@ import Label from "@/components/form/Label";
 import Button from "@/components/ui/button/Button";
 import TelegramNotificationSettings from "@/components/admin/TelegramNotificationSettings";
 import WhatsAppSupportSettings from "@/components/admin/WhatsAppSupportSettings";
+import { businessContact } from "@/lib/business-contact";
 import { sql } from "@/server/db";
 import { getServerEnv } from "@/server/env";
 import { saveOperationsSettings } from "../actions";
@@ -62,7 +63,7 @@ export default async function SettingsPage() {
         events={telegram?.events ?? {}}
         tokenConfigured={Boolean(telegram?.botTokenEncrypted || env.TELEGRAM_BOT_TOKEN)}
       />
-      <WhatsAppSupportSettings supportNumber={whatsapp?.number ?? ""} />
+      <WhatsAppSupportSettings supportNumber={whatsapp?.number ?? businessContact.whatsappNumber} />
     </div>
   );
 }

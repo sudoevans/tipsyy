@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
+import BrandLogo from "./BrandLogo";
 
 const AGE_GATE_KEY = "tipsy-theoryy-age-confirmed";
 type AgeState = "checking" | "prompt" | "accepted" | "rejected";
@@ -26,11 +27,14 @@ export default function AgeGate() {
   const pathname = usePathname();
   const state = useSyncExternalStore(subscribeAgeState, readAgeState, () => "checking");
 
-  if (pathname.startsWith("/admin") || state === "accepted") return null;
+  // Locale-prefixed admin URLs (for example /en/admin/orders) do not start
+  // with /admin, so check the path segment instead of the raw prefix.
+  const isAdminRoute = /(?:^|\/)admin(?:\/|$)/.test(pathname);
+  if (isAdminRoute || state === "accepted") return null;
 
   return <div aria-label="Age confirmation" aria-modal="true" className="fixed inset-0 z-[2147483647] grid min-h-dvh place-items-center overflow-y-auto bg-[#171614] p-4" role="dialog">
     {state === "checking" ? <span className="size-7 animate-spin rounded-full border-2 border-white/25 border-t-[#ffc400]" aria-label="Loading" /> : <section className="w-full max-w-sm rounded-2xl bg-[#faf9f6] p-6 text-[#15130f] sm:p-7">
-      <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#8b5b00]">Tipsy Theoryy</p>
+      <BrandLogo />
       {state === "rejected" ? <>
         <h1 className="mt-3 text-[26px] font-semibold tracking-[-0.035em]">You must be 18 or older</h1>
         <p className="mt-3 text-[14px] leading-6 text-[#77736d]">This alcohol store is only available to adults aged 18 and over. You cannot continue into the store.</p>

@@ -7,6 +7,7 @@ import BeverageImage from "./BeverageImage";
 import { formatPrice } from "./currency";
 import type { StoreProduct } from "./data";
 import StoreIcon from "./StoreIcon";
+import { FavouriteButton } from "./CustomerSession";
 
 interface ProductCardProps {
   onAdd: () => void | Promise<void>;
@@ -17,7 +18,6 @@ interface ProductCardProps {
 
 export default function ProductCard({ onAdd, onRemove, product, quantity }: ProductCardProps) {
   const t = useTranslations("storefront");
-  const [isSaved, setIsSaved] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const name = product.name ?? t(`products.${product.id}.name`);
   const available = product.available ?? true;
@@ -39,7 +39,7 @@ export default function ProductCard({ onAdd, onRemove, product, quantity }: Prod
         <Link aria-label={name} className="absolute inset-0 cursor-pointer" href={`/products/${product.id}`}><BeverageImage alt={name} className="object-contain p-4 transition duration-[180ms] group-hover:scale-[1.02] sm:p-5" sizes="(min-width: 1280px) 250px, (min-width: 640px) 31vw, 46vw" src={product.imageUrl} /></Link>
         <div className="absolute inset-x-3 top-3 flex items-start justify-between gap-2">
           {product.badge ? <span className="rounded-full bg-tipsy-amber-500 px-2.5 py-1 text-[11px] font-semibold text-tipsy-ink">{t(`badges.${product.badge}`)}</span> : <span />}
-          <button aria-label={t("saveProduct", { product: name })} aria-pressed={isSaved} className={`flex size-9 items-center justify-center rounded-xl border border-tipsy-line bg-white/90 transition hover:bg-tipsy-amber-50 ${isSaved ? "text-tipsy-amber-700" : "text-tipsy-ink"}`} onClick={() => setIsSaved((saved) => !saved)} type="button"><StoreIcon className="size-4" name="heart" /></button>
+          <FavouriteButton productSlug={product.id} name={name} className="flex size-9 items-center justify-center rounded-xl border border-tipsy-line bg-white/90 transition hover:bg-tipsy-amber-50" />
         </div>
       </div>
       <div className="px-1 pt-3">

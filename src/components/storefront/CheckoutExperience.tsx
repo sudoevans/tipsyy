@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import BeverageImage from "./BeverageImage";
+import BrandLogo from "./BrandLogo";
 import PostPurchaseAccount from "./PostPurchaseAccount";
 import {
   clearCartForCheckout,
@@ -935,10 +936,10 @@ export default function CheckoutExperience() {
         <div className="mx-auto flex h-[86px] max-w-[1120px] items-center justify-between px-4 sm:px-7">
           <Link
             aria-label="Tipsy Theoryy home"
-            className="text-[26px] font-bold tracking-[-0.075em]"
+            className="shrink-0"
             href="/"
           >
-            tipsy<span className="text-tipsy-amber-500">.</span>theoryy
+            <BrandLogo className="h-16 w-28" preload />
           </Link>
           <span className="inline-flex items-center gap-2.5 text-[15px] text-tipsy-muted">
             <StoreIcon className="size-[18px] text-tipsy-ink" name="lock" />
@@ -950,7 +951,7 @@ export default function CheckoutExperience() {
         className={`sm:hidden [&_h1]:text-[24px] [&_h1]:leading-[1.1] [&_h1]:tracking-[-0.04em] ${step === "details" ? "[&_form>button:last-child]:hidden [&_section>button:last-child]:hidden" : ""}`}
       >
         <div className="mx-auto max-w-md px-4 py-4">
-          <div className="flex items-center">
+          <div className="flex items-center justify-between">
             <button
               aria-label="Back"
               className="flex size-11 items-center justify-center rounded-xl text-tipsy-ink transition active:bg-tipsy-surface"
@@ -966,6 +967,7 @@ export default function CheckoutExperience() {
             >
               <StoreIcon className="size-7" name="arrow-left" />
             </button>
+            <Link aria-label="Tipsy Theoryy home" href="/"><BrandLogo preload /></Link>
           </div>
           <ol
             className="relative mt-5 grid grid-cols-3 gap-2 before:absolute before:top-[18px] before:right-[16.66%] before:left-[16.66%] before:h-px before:bg-[#ded9d0]"

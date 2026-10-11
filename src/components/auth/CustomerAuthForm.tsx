@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import BrandLogo from "@/components/storefront/BrandLogo";
 
 export default function CustomerAuthForm({ mode }: { mode: "signin" | "signup" }) {
   const router = useRouter();
@@ -35,7 +36,7 @@ export default function CustomerAuthForm({ mode }: { mode: "signin" | "signup" }
 
   return <main className="grid min-h-dvh w-full place-items-center bg-[#faf9f6] px-4 py-8 text-[#15130f]">
     <section className="w-full max-w-md rounded-2xl border border-[#e9e5dd] bg-white p-6 sm:p-8">
-      <Link className="text-[25px] font-bold tracking-[-0.075em]" href="/">tipsy<span className="text-[#ffc400]">.</span>theoryy</Link>
+      <Link aria-label="Tipsy Theoryy home" className="inline-block" href="/"><BrandLogo className="h-16 w-28" preload /></Link>
       <h1 className="mt-8 text-[28px] font-semibold tracking-[-0.04em]">{stage === "code" ? "Verify your phone" : mode === "signup" ? "Create your account" : "Welcome back"}</h1>
       <p className="mt-2 text-[14px] leading-6 text-[#77736d]">{stage === "code" ? `Enter the six-digit code sent to ${phone}.` : "Use your phone number to continue securely without a password."}</p>
       <form className="mt-6 grid gap-4" onSubmit={submit}>

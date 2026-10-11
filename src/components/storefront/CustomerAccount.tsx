@@ -4,6 +4,10 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import StoreIcon from "./StoreIcon";
 import { formatPrice } from "./currency";
+import { useCustomerSession } from "./CustomerSession";
+import CustomerAuthForm from "@/components/auth/CustomerAuthForm";
+import { businessContact } from "@/lib/business-contact";
+import BrandLogo from "./BrandLogo";
 
 type View = "overview" | "orders" | "addresses" | "favourites" | "notifications" | "loyalty" | "settings" | "help";
 type ApiState = { loading: boolean; error: string; data: unknown };
@@ -27,9 +31,11 @@ function endpoint(view: View) {
 }
 
 export default function CustomerAccount({ view }: { view: View }) {
+  const { authenticated } = useCustomerSession();
   const [state, setState] = useState<ApiState>({ loading: view !== "help", error: "", data: null });
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
+    if (!authenticated) return;
     const url = endpoint(view);
     if (!url) return;
     let active = true;
@@ -39,10 +45,13 @@ export default function CustomerAccount({ view }: { view: View }) {
       if (active) setState({ loading: false, error: "", data: payload.data });
     }).catch(() => active && setState((current) => ({ loading: false, error: "We couldn’t refresh this page. Please try again.", data: current.data })));
     return () => { active = false; };
-  }, [view, refresh]);
+  }, [view, refresh, authenticated]);
+
+  if (authenticated === null) return <main className="grid min-h-dvh place-items-center bg-tipsy-canvas text-tipsy-muted" role="status">Loading…</main>;
+  if (!authenticated) return <CustomerAuthForm mode="signin" />;
 
   return <main className="min-h-screen bg-tipsy-canvas text-tipsy-ink">
-    <header className="bg-white"><div className="mx-auto flex h-16 max-w-[1120px] items-center justify-between px-4 sm:px-6"><Link className="text-2xl font-bold tracking-[-0.075em]" href="/">tipsy<span className="text-tipsy-amber-500">.</span>theoryy</Link><Link className="text-sm font-semibold text-tipsy-muted hover:text-tipsy-ink" href="/">Back to shop</Link></div></header>
+    <header className="bg-white"><div className="mx-auto flex h-16 max-w-[1120px] items-center justify-between px-4 sm:px-6"><Link aria-label="Tipsy Theoryy home" href="/"><BrandLogo preload /></Link><Link className="text-sm font-semibold text-tipsy-muted hover:text-tipsy-ink" href="/">Back to shop</Link></div></header>
     <div className="mx-auto grid max-w-[1120px] gap-5 px-4 py-6 sm:px-6 md:grid-cols-[220px_minmax(0,1fr)] md:py-10">
       <nav aria-label="Account" className="flex gap-1 overflow-x-auto rounded-2xl bg-white p-2 md:block md:self-start">
         {links.map((item) => <Link className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${item.view === view ? "bg-tipsy-amber-50 text-tipsy-ink" : "text-tipsy-muted hover:bg-tipsy-surface hover:text-tipsy-ink"}`} href={item.view === "overview" ? "/account" : `/${item.view}`} key={item.view}><StoreIcon className="size-4" name={item.icon} />{item.label}</Link>)}
@@ -103,4 +112,4 @@ function Settings({ data, onRefresh }: { data: Record<string, unknown>; onRefres
   return <><h1 className="text-2xl font-semibold">Settings</h1><form className="mt-5 grid max-w-lg gap-4" onSubmit={submit}><label className="grid gap-1.5 text-sm font-semibold">Name<input className="h-12 rounded-xl border border-tipsy-line px-3 text-sm outline-none focus:border-tipsy-amber-500" defaultValue={String(data.display_name ?? "")} name="name" required /></label><label className="flex items-center gap-2 text-sm"><input defaultChecked={Boolean(data.marketing_opt_in)} name="marketing" type="checkbox" /> Send me useful offers</label><button className="h-12 rounded-xl bg-tipsy-amber-500 text-sm font-bold" type="submit">Save changes</button>{message ? <p className="text-sm text-tipsy-muted">{message}</p> : null}</form></>;
 }
 
-function Help() { return <><h1 className="text-2xl font-semibold">Help & support</h1><p className="mt-2 max-w-xl text-sm leading-6 text-tipsy-muted">Need help with an order, payment, or delivery? Contact support and include your order number when possible.</p><div className="mt-6 grid max-w-lg gap-3"><a className="rounded-xl bg-tipsy-surface p-4 text-sm font-semibold" href="mailto:support@tipsytheory.co.ke">Email support</a></div></>; }
+function Help() { return <><h1 className="text-2xl font-semibold">Help & support</h1><p className="mt-2 max-w-xl text-sm leading-6 text-tipsy-muted">Contact us for help with your order, payment or delivery.</p><div className="mt-6 grid max-w-lg gap-3"><a className="rounded-xl bg-tipsy-surface p-4 text-sm font-semibold" href={`mailto:${businessContact.email}`}>Email support · {businessContact.email}</a><a className="rounded-xl bg-tipsy-surface p-4 text-sm font-semibold" href={`https://wa.me/${businessContact.whatsappNumber}`} target="_blank" rel="noreferrer">WhatsApp · {businessContact.phone}</a><a className="rounded-xl bg-tipsy-surface p-4 text-sm font-semibold" href={businessContact.contactCard} download="Tipsy-Theoryy.vcf">Add to contacts</a></div></>; }

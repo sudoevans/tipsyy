@@ -3,6 +3,7 @@
 import { ArrowUpRight, MessageCircle, X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { businessContact } from "@/lib/business-contact";
 
 export default function WhatsAppSupport() {
   const pathname = usePathname();
@@ -46,7 +47,7 @@ export default function WhatsAppSupport() {
   if (/(?:^|\/)admin(?:\/|$)/.test(pathname)) return null;
 
   const chatUrl = (message: string) => `https://wa.me/${supportNumber}?text=${encodeURIComponent(message)}`;
-  const orderMessage = `Hi Tipsy Theoryy, I need help with an order. Page: ${typeof window === "undefined" ? "" : window.location.href}`;
+  const orderMessage = `Hi Tipsy Theoryy, I need help with an order. Order number: \nPage: ${pathname}`;
   const contactLink = (label: string, message: string) => supportNumber ? (
     <a className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-tipsy-line px-3 py-3 text-sm font-semibold text-tipsy-ink transition hover:bg-tipsy-surface" href={chatUrl(message)} rel="noreferrer" target="_blank">{label}<ArrowUpRight className="size-4 shrink-0 text-tipsy-muted" /></a>
   ) : <div aria-disabled="true" className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-tipsy-line px-3 py-3 text-sm font-semibold text-tipsy-muted">{label}<ArrowUpRight className="size-4 shrink-0 text-tipsy-muted/50" /></div>;
@@ -64,8 +65,9 @@ export default function WhatsAppSupport() {
         <button aria-label="Close support" className="flex size-8 shrink-0 items-center justify-center rounded-lg text-white/75 transition hover:bg-white/10 hover:text-white" onClick={() => setOpen(false)} type="button"><X className="size-4" /></button>
       </div>
       <div className="grid gap-2 overflow-y-auto p-3">
-        {contactLink("Ask a question", "Hi Tipsy Theoryy, I have a question about your store.")}
+        {contactLink("Ask a question", "Hi Tipsy Theoryy, I would like to ask a question about your store.")}
         {contactLink("Get help with an order", orderMessage)}
+        <a className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-tipsy-line px-3 py-3 text-sm font-semibold text-tipsy-ink transition hover:bg-tipsy-surface" href={`mailto:${businessContact.email}`}>Email support<ArrowUpRight className="size-4 shrink-0 text-tipsy-muted" /></a>
         {!supportNumber ? <p className="px-1 pt-1 text-xs leading-5 text-amber-800">{supportNumber === null ? "Connecting to support…" : "WhatsApp support isn’t available just now."}</p> : null}
       </div>
     </section>

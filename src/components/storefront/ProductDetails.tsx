@@ -14,6 +14,7 @@ import ProductCard from "./ProductCard";
 import StoreFooter from "./StoreFooter";
 import StoreHeader from "./StoreHeader";
 import StoreIcon from "./StoreIcon";
+import { FavouriteButton } from "./CustomerSession";
 import useCatalogProducts from "./useCatalogProducts";
 
 interface ProductDetailsProps {
@@ -163,13 +164,7 @@ export default function ProductDetails({ product }: ProductDetailsProps) {
               sizes="(min-width: 1024px) 55vw, 100vw"
               src={product.imageUrl}
             />
-            <button
-              aria-label={t("saveProduct", { product: name })}
-              className="absolute top-4 right-4 flex size-10 items-center justify-center rounded-xl border border-tipsy-line bg-white text-tipsy-ink transition hover:bg-tipsy-amber-50"
-              type="button"
-            >
-              <StoreIcon className="size-5" name="heart" />
-            </button>
+            <FavouriteButton productSlug={product.id} name={name} className="absolute top-4 right-4 flex size-10 items-center justify-center rounded-xl border border-tipsy-line bg-white transition hover:bg-tipsy-amber-50" />
           </div>
           <div className="rounded-2xl border border-tipsy-line bg-white p-5 sm:p-7">
             <span className="rounded-full bg-tipsy-amber-100 px-2.5 py-1 text-xs font-semibold text-tipsy-ink">

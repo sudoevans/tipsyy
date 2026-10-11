@@ -1,4 +1,5 @@
 import { sql } from "@/server/db";
+import { businessContact } from "@/lib/business-contact";
 import { apiErrorResponse, apiSuccess } from "@/server/http";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,7 @@ export async function GET() {
       FROM platform_settings
       WHERE key='support.whatsapp'
     `;
-    const number = String(setting?.number ?? "").replace(/\D/g, "");
+    const number = String(setting?.number ?? businessContact.whatsappNumber).replace(/\D/g, "");
     return apiSuccess({ number });
   } catch (error) {
     return apiErrorResponse(error);
