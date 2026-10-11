@@ -49,6 +49,8 @@ export async function setProductActive(productId: string, active: boolean) {
     productId,
   );
   revalidatePath("/admin/products");
+  revalidatePath("/admin/inventory");
+  revalidatePath("/");
 }
 
 export async function setProductsActive(productIds: string[], active: boolean) {
@@ -63,6 +65,8 @@ export async function setProductsActive(productIds: string[], active: boolean) {
     { count: ids.length },
   );
   revalidatePath("/admin/products");
+  revalidatePath("/admin/inventory");
+  revalidatePath("/");
 }
 
 export async function duplicateProduct(productId: string) {
