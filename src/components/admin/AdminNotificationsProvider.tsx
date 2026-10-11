@@ -27,6 +27,7 @@ type NotificationsContextValue = {
   notifications: AdminNotification[];
   total: number;
   loading: boolean;
+  saving: boolean;
   refresh: () => Promise<void>;
   loadMore: () => Promise<void>;
   markRead: (id: string) => Promise<void>;
@@ -71,6 +72,9 @@ export function AdminNotificationsProvider({
   const hasLoadedNotifications = useRef(false);
   const soundEnabledRef = useRef(true);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const revision = useRef(0);
+  const pendingMutations = useRef(new Map<string, Promise<void>>());
+  const [saving, setSaving] = useState(false);
 
   const setSoundEnabled = useCallback((enabled: boolean) => {
     soundEnabledRef.current = enabled;
@@ -102,11 +106,13 @@ export function AdminNotificationsProvider({
   }, []);
 
   const load = useCallback(async (nextPage: number, append: boolean) => {
+    if (pendingMutations.current.size) return;
+    const version = ++revision.current;
     setLoading(true);
     try {
       const response = await fetch(`/api/v1/admin/notifications?page=${nextPage}&pageSize=6`, { cache: "no-store" });
       const payload = await response.json() as { data?: { summary: AdminNotificationSummary; notifications: { items: AdminNotification[]; total: number } } };
-      if (!response.ok || !payload.data) return;
+      if (!response.ok || !payload.data || version !== revision.current) return;
       const nextItems = payload.data.notifications.items;
       if (hasLoadedNotifications.current && nextItems.some((item) => item.event_type === "ORDER_READY" && !knownNotificationIds.current.has(item.id))) playOrderSound();
       for (const item of nextItems) knownNotificationIds.current.add(item.id);
@@ -115,45 +121,64 @@ export function AdminNotificationsProvider({
       setNotifications((current) => append ? [...current, ...nextItems.filter((item) => !current.some((existing) => existing.id === item.id))] : nextItems);
       setTotal(payload.data.notifications.total);
       setPage(nextPage);
+    } catch {
+      // Keep the last known state when a background refresh is unavailable.
     } finally {
-      setLoading(false);
+      if (version === revision.current) setLoading(false);
     }
   }, [playOrderSound]);
 
   const refresh = useCallback(() => load(1, false), [load]);
+  const persistRead = useCallback((key: string, body: object) => {
+    const pending = pendingMutations.current.get(key);
+    if (pending) return pending;
+    ++revision.current;
+    setLoading(false);
+    setSaving(true);
+    const operation = (async () => {
+      try {
+        const response = await fetch("/api/v1/admin/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const payload = await response.json() as { data?: { read?: boolean; summary?: AdminNotificationSummary } };
+        if (!response.ok || !payload.data?.read) throw new Error("Could not mark notifications as read.");
+        if (payload.data.summary && pendingMutations.current.size === 1) setSummary(payload.data.summary);
+      } finally {
+        pendingMutations.current.delete(key);
+        if (!pendingMutations.current.size) { setSaving(false); await refresh(); }
+      }
+    })();
+    pendingMutations.current.set(key, operation);
+    return operation;
+  }, [refresh]);
   const loadMore = useCallback(async () => {
     if (loading || notifications.length >= total) return;
     await load(page + 1, true);
   }, [load, loading, notifications.length, page, total]);
 
   const markRead = useCallback(async (id: string) => {
+    if (pendingMutations.current.has(id)) return pendingMutations.current.get(id);
     const notification = notifications.find((item) => item.id === id);
     if (!notification || notification.read_at) return;
     setNotifications((current) => current.map((item) => item.id === id ? { ...item, read_at: new Date().toISOString() } : item));
     setSummary((current) => ({ ...current, unread: Math.max(0, current.unread - 1), newOrders: Math.max(0, current.newOrders - (notification.event_type === "ORDER_READY" ? 1 : 0)) }));
     try {
-      const response = await fetch("/api/v1/admin/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notificationId: id }) });
-      const payload = await response.json() as { data?: { read?: boolean } };
-      if (!response.ok || !payload.data?.read) throw new Error("Could not mark notification as read.");
+      await persistRead(id, { notificationId: id });
     } catch (error) {
       await refresh();
       throw error;
     }
-  }, [notifications, refresh]);
+  }, [notifications, refresh, persistRead]);
 
   const markAllRead = useCallback(async () => {
+    if (pendingMutations.current.size) return;
     setNotifications((current) => current.map((item) => ({ ...item, read_at: item.read_at ?? new Date().toISOString() })));
-    setSummary((current) => ({ ...current, unread: 0, newOrders: 0 }));
+    setSummary(emptySummary);
     try {
-      const response = await fetch("/api/v1/admin/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ markAll: true }) });
-      const payload = await response.json() as { data?: { read?: boolean } };
-      if (!response.ok || !payload.data?.read) throw new Error("Could not mark notifications as read.");
-      await refresh();
+      await persistRead("all", { markAll: true });
     } catch (error) {
       await refresh();
       throw error;
     }
-  }, [refresh]);
+  }, [refresh, persistRead]);
 
   const markCategoryRead = useCallback(async (category: "inventory" | "transactions") => {
     const relevant = (item: AdminNotification) => category === "inventory"
@@ -162,17 +187,14 @@ export function AdminNotificationsProvider({
     setNotifications((current) => current.map((item) => relevant(item) ? { ...item, read_at: item.read_at ?? new Date().toISOString() } : item));
     setSummary((current) => category === "inventory"
       ? { ...current, unread: Math.max(0, current.unread - current.lowStock), lowStock: 0 }
-      : { ...current, unread: 0, newOrders: 0, openInvestigations: 0 });
+      : { ...current, unread: Math.max(0, current.unread - current.openInvestigations), openInvestigations: 0 });
     try {
-      const response = await fetch("/api/v1/admin/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ markCategory: category }) });
-      const payload = await response.json() as { data?: { read?: boolean } };
-      if (!response.ok || !payload.data?.read) throw new Error("Could not mark section notifications as read.");
-      await refresh();
+      await persistRead(category, { markCategory: category });
     } catch (error) {
       await refresh();
       throw error;
     }
-  }, [refresh]);
+  }, [refresh, persistRead]);
 
   useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
 
@@ -193,7 +215,7 @@ export function AdminNotificationsProvider({
     return () => { window.clearTimeout(initialRefresh); document.removeEventListener("visibilitychange", onVisibility); window.clearInterval(interval); window.removeEventListener("pointerdown", unlockAudio); window.removeEventListener("keydown", unlockAudio); void audioContextRef.current?.close(); audioContextRef.current = null; };
   }, [refresh]);
 
-  const value = useMemo(() => ({ summary, notifications, total, loading, refresh, loadMore, markRead, markAllRead, markCategoryRead, soundEnabled, setSoundEnabled }), [summary, notifications, total, loading, refresh, loadMore, markRead, markAllRead, markCategoryRead, soundEnabled, setSoundEnabled]);
+  const value = useMemo(() => ({ summary, notifications, total, loading, saving, refresh, loadMore, markRead, markAllRead, markCategoryRead, soundEnabled, setSoundEnabled }), [summary, notifications, total, loading, saving, refresh, loadMore, markRead, markAllRead, markCategoryRead, soundEnabled, setSoundEnabled]);
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
 }
 

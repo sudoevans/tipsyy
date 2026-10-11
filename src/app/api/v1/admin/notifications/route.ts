@@ -44,7 +44,7 @@ export async function PATCH(request: NextRequest) {
     } else {
       await markAllAdminNotificationsRead(admin.id);
     }
-    return apiSuccess({ read: true });
+    return apiSuccess({ read: true, summary: await getAdminNotificationSummary(admin.id) });
   } catch (error) {
     return apiErrorResponse(error);
   }
