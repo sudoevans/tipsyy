@@ -37,7 +37,7 @@ export default function useCatalogProducts() {
           available: row.available_quantity > 0,
           availableQuantity: row.available_quantity,
           badge: row.featured ? "staffPick" : undefined,
-        })));
+        })).sort((a, b) => Number(b.available) - Number(a.available)));
       })
       .catch((requestError: unknown) => {
         if (requestError instanceof DOMException && requestError.name === "AbortError") return;

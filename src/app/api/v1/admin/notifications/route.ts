@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   getAdminNotificationSummary,
   listAdminNotifications,
+  markAdminNotificationsReadByCategory,
   markAdminNotificationRead,
   markAllAdminNotificationsRead,
 } from "@/server/admin-notifications";
@@ -13,6 +14,7 @@ import { requireAdmin } from "@/server/request-auth";
 const updateSchema = z.union([
   z.object({ notificationId: z.string().uuid() }),
   z.object({ markAll: z.literal(true) }),
+  z.object({ markCategory: z.enum(["inventory", "transactions"]) }),
 ]);
 
 export async function GET(request: NextRequest) {
@@ -37,6 +39,8 @@ export async function PATCH(request: NextRequest) {
     if ("notificationId" in input) {
       const updated = await markAdminNotificationRead(admin.id, input.notificationId);
       if (!updated) return apiSuccess({ read: false });
+    } else if ("markCategory" in input) {
+      await markAdminNotificationsReadByCategory(admin.id, input.markCategory);
     } else {
       await markAllAdminNotificationsRead(admin.id);
     }

@@ -10,6 +10,14 @@ const eventGroups = [
   { title: "Inventory", events: [["INVENTORY_LOW_STOCK", "Low stock"], ["INVENTORY_OUT_OF_STOCK", "Out of stock"]] },
 ] as const;
 
+function actionErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback;
+  if (/Server Action .+ was not found on the server/i.test(message)) {
+    return "This page is out of date after a deployment. Refresh the page and try again.";
+  }
+  return message;
+}
+
 export default function TelegramNotificationSettings({
   chatId,
   events,
@@ -32,7 +40,7 @@ export default function TelegramNotificationSettings({
         await testTelegramConnection(currentChat);
         showToast({ title: "Telegram connected", description: "A test message was sent to the chat.", tone: "success" });
       } catch (error) {
-        showToast({ title: "Telegram test failed", description: error instanceof Error ? error.message : "Check the chat ID and bot configuration.", tone: "error" });
+        showToast({ title: "Telegram test failed", description: actionErrorMessage(error, "Check the chat ID and bot configuration."), tone: "error" });
       }
     });
   };
@@ -49,7 +57,7 @@ export default function TelegramNotificationSettings({
           if (tokenInput instanceof HTMLInputElement) tokenInput.value = "";
           showToast({ title: "Telegram settings saved", tone: "success" });
         } catch (error) {
-          showToast({ title: "Could not save Telegram settings", description: error instanceof Error ? error.message : "Please try again.", tone: "error" });
+          showToast({ title: "Could not save Telegram settings", description: actionErrorMessage(error, "Please try again."), tone: "error" });
         }
       });
     }} className="space-y-5 rounded-xl border border-gray-200 bg-white p-5">

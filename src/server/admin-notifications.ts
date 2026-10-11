@@ -106,7 +106,7 @@ export async function evaluateInventoryNotifications(tx: Transaction | Database)
 }
 
 export async function getAdminNotificationSummary(userId: string) {
-  const [[counts], [inventory], [investigations]] = await Promise.all([
+  const [[counts], [sectionCounts]] = await Promise.all([
     sql<{ unread: number; new_orders: number }[]>`
       SELECT COUNT(*) FILTER (WHERE r.read_at IS NULL)::int AS unread,
              COUNT(*) FILTER (WHERE r.read_at IS NULL AND n.event_type = 'ORDER_READY')::int AS new_orders
@@ -114,20 +114,24 @@ export async function getAdminNotificationSummary(userId: string) {
       JOIN admin_notifications n ON n.id = r.notification_id
       WHERE r.user_id = ${userId}
     `,
-    sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count FROM inventory
-      WHERE on_hand_quantity - reserved_quantity <= low_stock_threshold
-    `,
-    sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count FROM payment_investigations
-      WHERE status IN ('OPEN', 'RECONCILING', 'MATCHED')
+    sql<{ low_stock: number; investigations: number }[]>`
+      SELECT
+        COUNT(*) FILTER (WHERE n.event_type IN ('INVENTORY_LOW_STOCK', 'INVENTORY_OUT_OF_STOCK') AND n.resolved_at IS NULL)::int AS low_stock,
+        COUNT(*) FILTER (WHERE (
+          n.event_type LIKE 'MPESA_%' OR n.event_type LIKE 'PAYMENT_%'
+          OR n.event_type LIKE 'UNMATCHED_MPESA%' OR n.event_type = 'DUPLICATE_MPESA_RECEIPT'
+          OR n.event_type = 'STK_RECEIPT_AFTER_QUERY_MISMATCH' OR n.event_type = 'PULLED_MPESA_RECEIPT_REVIEW'
+        ) AND n.resolved_at IS NULL)::int AS investigations
+      FROM admin_notification_recipients r
+      JOIN admin_notifications n ON n.id = r.notification_id
+      WHERE r.user_id = ${userId} AND r.read_at IS NULL
     `,
   ]);
   return {
     unread: counts?.unread ?? 0,
     newOrders: counts?.new_orders ?? 0,
-    lowStock: inventory?.count ?? 0,
-    openInvestigations: investigations?.count ?? 0,
+    lowStock: sectionCounts?.low_stock ?? 0,
+    openInvestigations: sectionCounts?.investigations ?? 0,
   };
 }
 
@@ -139,6 +143,7 @@ export async function listAdminNotifications(userId: string, page = 1, pageSize 
     sql<{
       id: string;
       event_type: string;
+      entity_type: string;
       severity: NotificationSeverity;
       title: string;
       body: string;
@@ -147,7 +152,7 @@ export async function listAdminNotifications(userId: string, page = 1, pageSize 
       resolved_at: Date | null;
       read_at: Date | null;
     }[]>`
-      SELECT n.id, n.event_type, n.severity::text AS severity, n.title, n.body, n.href,
+      SELECT n.id, n.event_type, n.entity_type, n.severity::text AS severity, n.title, n.body, n.href,
              n.created_at, n.resolved_at, r.read_at
       FROM admin_notification_recipients r
       JOIN admin_notifications n ON n.id = r.notification_id
@@ -176,5 +181,30 @@ export async function markAllAdminNotificationsRead(userId: string) {
   await sql`
     UPDATE admin_notification_recipients SET read_at = now()
     WHERE user_id = ${userId} AND read_at IS NULL
+  `;
+}
+
+export async function markAdminNotificationsReadByCategory(
+  userId: string,
+  category: "inventory" | "transactions",
+) {
+  if (category === "inventory") {
+    await sql`
+      UPDATE admin_notification_recipients r SET read_at = now()
+      FROM admin_notifications n
+      WHERE n.id = r.notification_id AND r.user_id = ${userId}
+        AND r.read_at IS NULL AND n.entity_type = 'inventory_variant'
+    `;
+    return;
+  }
+  await sql`
+    UPDATE admin_notification_recipients r SET read_at = now()
+    FROM admin_notifications n
+    WHERE n.id = r.notification_id AND r.user_id = ${userId}
+      AND r.read_at IS NULL AND (
+        n.event_type LIKE 'MPESA_%' OR n.event_type LIKE 'PAYMENT_%'
+        OR n.event_type LIKE 'UNMATCHED_MPESA%' OR n.event_type = 'DUPLICATE_MPESA_RECEIPT'
+        OR n.event_type = 'STK_RECEIPT_AFTER_QUERY_MISMATCH' OR n.event_type = 'PULLED_MPESA_RECEIPT_REVIEW'
+      )
   `;
 }
