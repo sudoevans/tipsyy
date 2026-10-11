@@ -12,7 +12,7 @@ import {
   Wallet01Icon,
   XCloseIcon,
 } from "@untitledui/icons-react/outline";
-import { type ReactNode, useMemo, useState, useTransition } from "react";
+import { type ReactNode, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   createRider,
@@ -128,10 +128,11 @@ const money = new Intl.NumberFormat("en-KE", {
   maximumFractionDigits: 0,
 });
 const dateTime = new Intl.DateTimeFormat("en-KE", {
+  timeZone: "Africa/Nairobi",
   dateStyle: "medium",
   timeStyle: "short",
 });
-const dateOnly = new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" });
+const dateOnly = new Intl.DateTimeFormat("en-KE", { dateStyle: "medium", timeZone: "Africa/Nairobi" });
 const pageSize = 10;
 
 const deliveryStatuses = [
@@ -202,7 +203,7 @@ export default function DriverOperations({
 }: Props) {
   const { showToast } = useAdminToast();
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("drivers");
   const [onboarding, setOnboarding] = useState(false);
   const [driverQuery, setDriverQuery] = useState("");
   const [driverStatus, setDriverStatus] = useState("all");
@@ -606,7 +607,6 @@ export default function DriverOperations({
       {tab === "payments" ? (
         <DriverPayments
           payouts={pagedPayouts}
-          payoutSummary={payoutSummary}
           pendingPayments={pendingPayments}
           search={payoutQuery}
           total={filteredPayouts.length}
@@ -973,7 +973,6 @@ function DriverRow({
 
 function DriverPayments({
   payouts,
-  payoutSummary,
   pendingPayments,
   search,
   total,
@@ -984,7 +983,6 @@ function DriverPayments({
   onPayDriver,
 }: {
   payouts: DriverPayout[];
-  payoutSummary: PayoutSummary;
   pendingPayments: PendingPayment[];
   search: string;
   total: number;
@@ -1007,28 +1005,6 @@ function DriverPayments({
 
   return (
     <div className="space-y-5">
-      <section className="rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <PaymentMetric
-            label="Total driver earnings"
-            value={money.format(payoutSummary.earned)}
-          />
-          <PaymentMetric
-            label="Paid to drivers"
-            value={money.format(payoutSummary.paid)}
-            tone="text-success-600"
-          />
-          <PaymentMetric
-            label="Pending payments"
-            value={money.format(payoutSummary.pending)}
-            tone="text-warning-600"
-          />
-          <PaymentMetric
-            label="This week"
-            value={money.format(payoutSummary.currentWeekDue)}
-          />
-        </div>
-      </section>
 
       <section className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-gray-800">
@@ -1199,25 +1175,6 @@ function DriverPayments({
   );
 }
 
-function PaymentMetric({
-  label,
-  value,
-  tone = "text-gray-800 dark:text-white",
-}: {
-  label: string;
-  value: string;
-  tone?: string;
-}) {
-  return (
-    <article className="rounded-lg border border-gray-200 bg-gray-50/50 p-4 dark:border-gray-700 dark:bg-white/[0.02]">
-      <p className="text-sm font-medium text-gray-500">{label}</p>
-      <p className={`mt-2 text-xl font-semibold tracking-tight ${tone}`}>
-        {value}
-      </p>
-    </article>
-  );
-}
-
 function RecordDriverPayoutDialog({
   payment,
   onClose,
@@ -1225,6 +1182,7 @@ function RecordDriverPayoutDialog({
   payment: PendingPayment;
   onClose: () => void;
 }) {
+  const paymentRequestId = useRef<string | null>(null);
   const { showToast } = useAdminToast();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -1242,11 +1200,14 @@ function RecordDriverPayoutDialog({
   const submit = (form: HTMLFormElement) =>
     startTransition(async () => {
       try {
-        const result = await recordDriverPayout(new FormData(form));
+        paymentRequestId.current ??= crypto.randomUUID();
+        const data = new FormData(form);
+        data.set("requestId", paymentRequestId.current);
+        const result = await recordDriverPayout(data);
         router.refresh();
         showToast({
           title: "Payment recorded",
-          description: `${result.count} orders paid for ${money.format(result.amount)}.`,
+          description: `${money.format(result.amount)} recorded for ${payment.riderName}.`,
           tone: "success",
         });
         onClose();
@@ -1317,7 +1278,7 @@ function RecordDriverPayoutDialog({
             </p>
           </div>
           <div className="rounded-lg bg-brand-50 px-4 py-3 text-right dark:bg-brand-500/10">
-            <p className="text-xs font-medium text-brand-600">Amount to pay</p>
+            <p className="text-xs font-medium text-brand-600">Pending balance</p>
             <p className="mt-1 text-lg font-semibold text-gray-800 dark:text-white">
               {money.format(payment.amount)}
             </p>
@@ -1377,6 +1338,9 @@ function RecordDriverPayoutDialog({
         </div>
         {payment.canPay ? (
           <div className="mx-5 mt-4">
+            <Field label="Amount to pay (KSh)">
+              <input name="amount" type="number" min="1" max={payment.amount} step="1" defaultValue={payment.amount} required className="field mt-1.5 mb-4 h-11" />
+            </Field>
             <Field label="Reference (optional)">
               <input
                 name="reference"
@@ -1609,9 +1573,12 @@ function OnboardDriverDialog({ onClose }: { onClose: () => void }) {
   const { showToast } = useAdminToast();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const submitting = useRef(false);
   const submit = (form: HTMLFormElement) =>
     startTransition(async () => {
       try {
+        if (submitting.current) return;
+        submitting.current = true;
         await createRider(new FormData(form));
         router.refresh();
         showToast({ title: "Driver onboarded", tone: "success" });
@@ -1625,7 +1592,7 @@ function OnboardDriverDialog({ onClose }: { onClose: () => void }) {
               : "Check the details and try again.",
           tone: "error",
         });
-      }
+      } finally { submitting.current = false; }
     });
   return (
     <div
