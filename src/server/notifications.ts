@@ -7,7 +7,7 @@ interface NotificationRow { id: string; channel: string; destination: string; su
 class TelegramDeliveryError extends Error {}
 
 export const TELEGRAM_EVENTS = [
-  "ORDER_CREATED", "ORDER_PAID", "ORDER_CANCELLED", "ORDER_REFUNDED",
+  "ORDER_PAID", "ORDER_CANCELLED", "ORDER_REFUNDED",
   "DRIVER_ASSIGNED", "DRIVER_PICKED_UP", "DRIVER_DROPPED", "DRIVER_CANCELLED",
   "INVENTORY_LOW_STOCK", "INVENTORY_OUT_OF_STOCK",
 ] as const;
@@ -17,6 +17,10 @@ export async function enqueueTelegramAlert(
   input: { eventType: string; entityType: string; entityId: string; title: string; body: string },
 ) {
   if (!(TELEGRAM_EVENTS as readonly string[]).includes(input.eventType)) return;
+  if (input.entityType === "order") {
+    const [paid] = await tx`SELECT id FROM payments WHERE order_id=${input.entityId} AND status='SUCCEEDED' LIMIT 1`;
+    if (!paid) return;
+  }
   const [setting] = await tx<{ value: { chatId?: string; events?: Record<string, boolean> } }[]>`
     SELECT value FROM platform_settings WHERE key='notifications.telegram'
   `;
@@ -33,7 +37,7 @@ export async function enqueueTelegramAlert(
       const items = await tx<{ product_name: string; size_label: string | null; quantity: number; line_total_minor: number }[]>`
         SELECT product_name,size_label,quantity,line_total_minor FROM order_items WHERE order_id=${input.entityId} ORDER BY created_at
       `;
-      const amount = (value: number) => new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(value / 100);
+      const amount = (value: number) => new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(value);
       const adminUrl = new URL(getServerEnv().APP_URL);
       const local = ["localhost", "127.0.0.1"].includes(adminUrl.hostname);
       if (!local && !adminUrl.hostname.startsWith("admin.")) adminUrl.hostname = `admin.${adminUrl.hostname}`;

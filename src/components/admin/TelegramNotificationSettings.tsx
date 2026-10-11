@@ -5,7 +5,7 @@ import { saveTelegramNotificationSettings, testTelegramConnection } from "@/app/
 import EditableSettingsCard from "./EditableSettingsCard";
 
 const eventGroups = [
-  { title: "Orders", events: [["ORDER_CREATED", "New order"], ["ORDER_PAID", "Payment confirmed"], ["ORDER_CANCELLED", "Order cancelled"], ["ORDER_REFUNDED", "Refund recorded"]] },
+  { title: "Orders", events: [["ORDER_PAID", "Payment confirmed"], ["ORDER_CANCELLED", "Paid order cancelled"], ["ORDER_REFUNDED", "Refund recorded"]] },
   { title: "Drivers", events: [["DRIVER_ASSIGNED", "Driver assigned"], ["DRIVER_PICKED_UP", "Order picked up"], ["DRIVER_DROPPED", "Order delivered"], ["DRIVER_CANCELLED", "Delivery cancelled"]] },
   { title: "Inventory", events: [["INVENTORY_LOW_STOCK", "Low stock"], ["INVENTORY_OUT_OF_STOCK", "Out of stock"]] },
 ] as const;
