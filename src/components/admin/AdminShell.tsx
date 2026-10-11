@@ -10,10 +10,10 @@ export default function AdminShell({ children, displayName, role }: { children: 
   const margin = isMobileOpen ? "ml-0" : isExpanded || isHovered ? "xl:ml-[290px]" : "xl:ml-[90px]";
   return (
     <div className="min-h-screen xl:flex">
-      <AppSidebar />
+      <AppSidebar displayName={displayName} role={role} />
       <Backdrop />
       <div className={`min-w-0 flex-1 transition-all duration-300 ease-in-out ${margin}`}>
-        <AppHeader displayName={displayName} role={role} />
+        <AppHeader />
         <main className="mx-auto max-w-(--breakpoint-2xl) p-4 md:p-6">{children}</main>
       </div>
     </div>

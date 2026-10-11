@@ -2,6 +2,7 @@
 
 import { useSidebar } from "@/context/SidebarContext";
 import { useAdminNotifications } from "@/components/admin/AdminNotificationsProvider";
+import { useEffect, useState } from "react";
 import {
   BoltIcon,
   BoxCubeIcon,
@@ -16,7 +17,7 @@ import {
   TaskIcon,
   UserCircleIcon,
 } from "@/icons";
-import { Link, usePathname } from "@/i18n/navigation";
+import { Link, usePathname, useRouter } from "@/i18n/navigation";
 import { cn } from "@/utils";
 import Image from "next/image";
 import type { ReactNode } from "react";
@@ -108,9 +109,30 @@ function NavigationGroup({
   );
 }
 
-export default function AppSidebar() {
+export default function AppSidebar({ displayName, role }: { displayName?: string | null; role?: string | null }) {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
+  const { markCategoryRead } = useAdminNotifications();
+  const pathname = usePathname();
+  const router = useRouter();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const expanded = isExpanded || isHovered || isMobileOpen;
+  useEffect(() => {
+    if (pathname === "/admin/inventory" || pathname.startsWith("/admin/inventory/")) void markCategoryRead("inventory").catch(() => undefined);
+    else if (pathname === "/admin/transactions" || pathname.startsWith("/admin/transactions/")) void markCategoryRead("transactions").catch(() => undefined);
+  }, [pathname, markCategoryRead]);
+
+  const signOut = async () => {
+    setSigningOut(true);
+    try {
+      await fetch("/api/v1/admin/auth/logout", { method: "POST" });
+      router.replace("/admin/login");
+      router.refresh();
+    } finally {
+      setSigningOut(false);
+      setProfileOpen(false);
+    }
+  };
   return (
     <aside
       className={cn(
@@ -134,7 +156,7 @@ export default function AppSidebar() {
           {expanded ? (
             <span className="flex items-center gap-2.5">
               <Image
-                src="/images/logo/logo-icon.svg"
+                src="/images/logo/tipsyy-icon.svg"
                 alt=""
                 width={32}
                 height={32}
@@ -146,7 +168,7 @@ export default function AppSidebar() {
             </span>
           ) : (
             <Image
-              src="/images/logo/logo-icon.svg"
+              src="/images/logo/tipsyy-icon.svg"
               alt="Tipsy Theoryy admin"
               width={32}
               height={32}
@@ -175,6 +197,17 @@ export default function AppSidebar() {
           <PageIcon />
           {expanded ? <span>View storefront</span> : null}
         </Link>
+        <div className="relative mt-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+          {profileOpen ? <div className="absolute bottom-full left-0 z-20 mb-2 w-60 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+            <div className="px-3 py-2"><p className="truncate text-sm font-semibold text-gray-800 dark:text-white">{displayName || "Administrator"}</p><p className="text-xs text-gray-500">{role === "ADMIN" ? "Administrator" : "Support"}</p></div>
+            <Link className="block rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/5" href="/admin/settings" onClick={() => setProfileOpen(false)}>Settings</Link>
+            <button className="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-500/10" disabled={signingOut} onClick={() => void signOut()} type="button">{signingOut ? "Signing out…" : "Sign out"}</button>
+          </div> : null}
+          <button aria-expanded={profileOpen} className={cn("flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-gray-50 dark:hover:bg-white/5", expanded ? "justify-start" : "xl:justify-center")} onClick={() => setProfileOpen((open) => !open)} type="button">
+            <Image alt="" className="size-9 rounded-full object-cover" height={36} src="/images/user/owner.png" width={36} />
+            {expanded ? <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-gray-800 dark:text-white">{displayName || "Administrator"}</span><span className="block text-xs text-gray-500">{role === "ADMIN" ? "Administrator" : "Support"}</span></span> : null}
+          </button>
+        </div>
       </div>
     </aside>
   );

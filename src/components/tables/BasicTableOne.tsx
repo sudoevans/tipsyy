@@ -114,7 +114,7 @@ export default function BasicTableOne({
               <Table
                 className={noHorizontalScroll ? "w-full table-fixed" : undefined}
               >
-                <TableHeader className="border-b border-gray-100 dark:border-white/5">
+                <TableHeader className="border-b border-gray-100 bg-gray-50/80 dark:border-white/5 dark:bg-gray-800/70">
                   <TableRow>
                     {columns.map((column) => (
                       <TableCell

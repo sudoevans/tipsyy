@@ -968,7 +968,7 @@ export async function createContentBlock(formData: FormData) {
       body: z.string(),
       imageUrl: z.string(),
       linkUrl: z.string(),
-      kind: z.enum(["HERO_BANNER", "FEATURED_SECTION"]),
+      kind: z.literal("HERO_BANNER"),
     })
     .parse({
       key: text(formData, "key"),
