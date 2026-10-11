@@ -39,8 +39,7 @@ jobs:
       - name: Tests
         run: npm test
 
-      - name: Build Cloudflare Worker for pull requests and preview branch
-        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
+      - name: Build Cloudflare Worker
         run: npm run build:cloudflare
 
       - name: Scan source for TODOs and FIXMEs
@@ -66,4 +65,4 @@ jobs:
             exit 0
           fi
           npm run db:migrate
-          npm run deploy
+          npx opennextjs-cloudflare deploy
