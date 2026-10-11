@@ -20,6 +20,7 @@ import {
   type StkCallbackPayload,
 } from "./mpesa";
 import { hashSecret, normalizeKenyanPhone } from "./security";
+import { receiptMatchesOrder } from "./payment-receipt-match";
 
 export const initiatePaymentSchema = z.object({
   orderNumber: z.string().min(4).max(40),
@@ -538,7 +539,7 @@ export async function checkPendingStkStatus(
     FROM orders o
     JOIN payments p ON p.order_id = o.id
     JOIN LATERAL (
-      SELECT id, status, checkout_request_id, initiated_at
+      SELECT id, status, checkout_request_id, initiated_at, callback_received_at
       FROM payment_attempts
       WHERE payment_id = p.id
       ORDER BY initiated_at DESC
@@ -1590,7 +1591,7 @@ export async function reportPaymentIssue(
     `;
     if (!payment) throw new ApiError(404, "ORDER_NOT_FOUND", "Order not found.");
     if (payment.payment_status === "SUCCEEDED") {
-      throw new ApiError(409, "PAYMENT_ALREADY_COMPLETE", "This order has already been paid.");
+      return { id: payment.payment_id, status: "SUCCEEDED", existing: true };
     }
     if (["REFUNDED"].includes(payment.payment_status)) {
       throw new ApiError(409, "PAYMENT_NOT_REPORTABLE", "This payment can no longer be reviewed.");
@@ -1737,36 +1738,51 @@ export async function confirmPaymentInvestigation(
   });
 }
 
-export async function verifyReceipt(
-  input: z.infer<typeof receiptLookupSchema>,
-) {
-  const [payment] = await sql<
-    {
-      status: string;
-      provider_receipt: string | null;
-      paid_at: Date | null;
-      amount_minor: number;
-    }[]
-  >`
-    SELECT p.status, p.provider_receipt, p.paid_at, p.amount_minor
-    FROM orders o JOIN payments p ON p.order_id = o.id
-    WHERE o.order_number = ${input.orderNumber} AND o.access_token_hash = ${hashSecret(input.accessToken)}
-  `;
-  if (!payment) throw new ApiError(404, "ORDER_NOT_FOUND", "Order not found.");
-  if (
-    payment.status !== "SUCCEEDED" ||
-    payment.provider_receipt !== input.receipt
-  ) {
-    throw new ApiError(
-      422,
-      "RECEIPT_NOT_VERIFIED",
-      "That code does not match a completed M-Pesa payment for this order.",
-    );
-  }
-  return {
-    verified: true,
-    receipt: payment.provider_receipt,
-    paidAt: payment.paid_at,
-    amount: payment.amount_minor,
-  };
+export async function verifyReceipt(input: z.infer<typeof receiptLookupSchema>) {
+  return withTransaction(async (tx) => {
+    const [payment] = await tx<{
+      payment_id: string; order_id: string; status: string; provider_receipt: string | null;
+      paid_at: Date | null; amount_minor: number; order_number: string; order_status: string;
+      customer_phone: string; user_id: string | null; created_at: Date;
+    }[]>`
+      SELECT p.id AS payment_id,o.id AS order_id,p.status::text,p.provider_receipt,p.paid_at,p.amount_minor,
+        o.order_number,o.status::text AS order_status,o.customer_phone,o.user_id,o.created_at
+      FROM orders o JOIN payments p ON p.order_id=o.id
+      WHERE o.order_number=${input.orderNumber} AND o.access_token_hash=${hashSecret(input.accessToken)}
+      FOR UPDATE OF o,p
+    `;
+    if (!payment) throw new ApiError(404, "ORDER_NOT_FOUND", "Order not found.");
+    if (payment.status === "SUCCEEDED") {
+      return { verified: true, receipt: payment.provider_receipt, paidAt: payment.paid_at, amount: payment.amount_minor };
+    }
+    const [receipt] = await tx<{
+      id: string; receipt: string; amount_minor: number; payer_phone: string | null;
+      bill_reference: string | null; paid_at: Date | null; payment_id: string | null; order_id: string | null; status: string;
+    }[]>`
+      SELECT id,receipt,amount_minor,payer_phone,bill_reference,paid_at,payment_id,order_id,status
+      FROM mpesa_receipts WHERE lower(receipt)=lower(${input.receipt}) FOR UPDATE
+    `;
+    const [owner] = await tx<{ id: string }[]>`
+      SELECT id FROM payments WHERE lower(provider_receipt)=lower(${input.receipt})
+    `;
+    if ((owner && owner.id !== payment.payment_id)
+      || (receipt?.payment_id && receipt.payment_id !== payment.payment_id)
+      || (receipt?.order_id && receipt.order_id !== payment.order_id)) {
+      throw new ApiError(409, "RECEIPT_ALREADY_USED", "That receipt belongs to another payment and cannot be used for this order.");
+    }
+    const valid = receipt && receiptMatchesOrder(receipt, payment, owner?.id);
+    if (!valid || !receipt?.paid_at) {
+      throw new ApiError(422, "RECEIPT_NOT_VERIFIED", "We couldn’t verify this receipt against your order yet. Support will review it; don’t pay again.");
+    }
+    await settleSuccessfulPayment(tx, {
+      paymentId: payment.payment_id, orderId: payment.order_id, orderNumber: payment.order_number,
+      orderStatus: payment.order_status, userId: payment.user_id, receipt: receipt.receipt,
+      payerPhone: payment.customer_phone, paidAt: receipt.paid_at, amountMinor: payment.amount_minor,
+      source: "PULL_RECONCILIATION", resultDescription: "Customer receipt matched the verified M-Pesa ledger for this order.",
+    });
+    await tx`UPDATE mpesa_receipts SET payment_id=${payment.payment_id},order_id=${payment.order_id},status='MATCHED',updated_at=now() WHERE id=${receipt.id}`;
+    const reports = await tx<{ id: string }[]>`UPDATE payment_investigations SET status='MATCHED',updated_at=now() WHERE payment_id=${payment.payment_id} AND status IN ('OPEN','RECONCILING') RETURNING id`;
+    for (const report of reports) await resolveAdminNotification(tx, "PAYMENT_INVESTIGATION", "payment_investigation", report.id);
+    return { verified: true, receipt: receipt.receipt, paidAt: receipt.paid_at, amount: payment.amount_minor };
+  });
 }
