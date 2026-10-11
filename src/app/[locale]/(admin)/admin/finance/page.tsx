@@ -8,7 +8,7 @@ import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 const money = new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 0 });
-const day = new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" });
+const day = new Intl.DateTimeFormat("en-KE", { dateStyle: "medium", timeZone: "Africa/Nairobi" });
 
 function dateValue(value?: string) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "";

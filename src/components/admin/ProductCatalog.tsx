@@ -367,6 +367,7 @@ function ProductRow({
       </td>
       <td className="px-4 py-3">
         {new Intl.DateTimeFormat("en-KE", {
+          timeZone: "Africa/Nairobi",
           day: "2-digit",
           month: "short",
           year: "numeric",

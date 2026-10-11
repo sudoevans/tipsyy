@@ -11,7 +11,7 @@ export const metadata: Metadata = { title: "Operations overview | Tipsy Theoryy"
 export const dynamic = "force-dynamic";
 
 const money = new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 0 });
-const date = new Intl.DateTimeFormat("en-KE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+const date = new Intl.DateTimeFormat("en-KE", { timeZone: "Africa/Nairobi", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 export default async function AdminOverviewPage() {
   const [[summary], recent, monthly, [finance]] = await Promise.all([
