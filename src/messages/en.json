@@ -45,7 +45,7 @@
     "closeSearch": "Close search",
     "popularProducts": "Popular products",
     "searchMatches": "Matching drinks",
-    "navigation": { "shop": "Shop", "offers": "Offers" },
+    "navigation": { "shop": "All", "offers": "Offers" },
     "categories": {
       "whisky": "Whisky",
       "spirits": "Spirits",

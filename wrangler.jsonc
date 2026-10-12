@@ -16,6 +16,8 @@
     }
   ],
   "hyperdrive": [
+    // Operational reads must be fresh: query caching is disabled on this
+    // Hyperdrive configuration (managed through the Cloudflare API/CLI).
     {
       "binding": "HYPERDRIVE",
       "id": "99a35620a4cb409b8db44dd132e9456f"

@@ -1,7 +1,6 @@
 import { SidebarProvider } from "@/context/SidebarContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import AgeGate from "@/components/storefront/AgeGate";
-import WhatsAppSupport from "@/components/storefront/WhatsAppSupport";
 import { CustomerSessionProvider } from "@/components/storefront/CustomerSession";
 import { StorefrontToastProvider } from "@/components/storefront/StorefrontToast";
 import { GeistSans } from "geist/font/sans";
@@ -43,7 +42,7 @@ export default async function RootLayout({
         <AgeGate />
         <NextIntlClientProvider>
           <ThemeProvider>
-            <StorefrontToastProvider><CustomerSessionProvider><SidebarProvider>{children}<WhatsAppSupport /></SidebarProvider></CustomerSessionProvider></StorefrontToastProvider>
+            <StorefrontToastProvider><CustomerSessionProvider><SidebarProvider>{children}</SidebarProvider></CustomerSessionProvider></StorefrontToastProvider>
           </ThemeProvider>
         </NextIntlClientProvider>
       </body>

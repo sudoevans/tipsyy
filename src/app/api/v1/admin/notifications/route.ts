@@ -14,7 +14,7 @@ import { requireAdmin } from "@/server/request-auth";
 const updateSchema = z.union([
   z.object({ notificationId: z.string().uuid() }),
   z.object({ markAll: z.literal(true) }),
-  z.object({ markCategory: z.enum(["inventory", "transactions"]) }),
+  z.object({ markCategory: z.enum(["inventory", "transactions", "orders", "riders"]) }),
 ]);
 
 export async function GET(request: NextRequest) {

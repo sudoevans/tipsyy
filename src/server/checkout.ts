@@ -71,7 +71,7 @@ interface CouponRow {
   minimum_order_minor: number;
 }
 
-export const RESERVATION_MINUTES = 10;
+export const RESERVATION_MINUTES = 1;
 
 /**
  * Guest checkout begins a customer record early, so incomplete payments are

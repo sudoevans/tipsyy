@@ -204,6 +204,24 @@ export async function addInventoryStock(variantId: string, formData: FormData) {
   revalidatePath("/admin/inventory");
 }
 
+export async function adjustInventoryStock(variantId: string, formData: FormData) {
+  const admin = await requireAdministrator();
+  const id = idSchema.parse(variantId);
+  const input = z.object({ quantity: z.coerce.number().int().min(0).max(1_000_000), reason: z.string().trim().min(3).max(500) }).parse({ quantity: formData.get("quantity"), reason: formData.get("reason") });
+  await sql.begin(async (tx) => {
+    const [row] = await tx<{ on_hand_quantity: number; reserved_quantity: number }[]>`SELECT on_hand_quantity,reserved_quantity FROM inventory WHERE variant_id=${id} FOR UPDATE`;
+    if (!row) throw new Error("This variant is not in inventory.");
+    if (input.quantity < row.reserved_quantity) throw new Error(`Keep at least ${row.reserved_quantity} units for existing reservations.`);
+    if (input.quantity === row.on_hand_quantity) return;
+    await tx`UPDATE inventory SET on_hand_quantity=${input.quantity},updated_at=now() WHERE variant_id=${id}`;
+    await tx`INSERT INTO inventory_movements(variant_id,actor_user_id,movement_type,quantity,on_hand_before,on_hand_after) VALUES(${id},${admin.id},'ADJUSTMENT',${Math.abs(input.quantity-row.on_hand_quantity)},${row.on_hand_quantity},${input.quantity})`;
+    await tx`INSERT INTO admin_activity_logs(actor_user_id,action,entity_type,entity_id,metadata) VALUES(${admin.id},'inventory.stock_adjusted','product_variant',${id},${tx.json({ reason: input.reason, onHandBefore: row.on_hand_quantity, onHandAfter: input.quantity })})`;
+  });
+  await evaluateInventoryNotifications(sql);
+  revalidatePath("/admin/inventory");
+  revalidatePath("/");
+}
+
 export async function setInventoryStorefrontEnabled(variantId: string, enabled: boolean) {
   const admin = await requireAdministrator();
   const id = idSchema.parse(variantId);
@@ -562,11 +580,29 @@ export async function createRider(formData: FormData) {
   revalidatePath("/admin/delivery");
 }
 
+export async function removeRider(riderId: string) {
+  const admin = await requireAdministrator();
+  const id = idSchema.parse(riderId);
+  await sql.begin(async (tx) => {
+    const [rider] = await tx<{user_id: string; removed_at: Date | null}[]>`SELECT user_id,removed_at FROM riders WHERE id=${id} FOR UPDATE`;
+    if (!rider || rider.removed_at) return;
+    const [active] = await tx`SELECT id FROM delivery_assignments WHERE rider_id=${id} AND status IN ('ASSIGNED','ACCEPTED','PICKED_UP') LIMIT 1`;
+    if (active) throw new Error("Complete or reassign this driver's active delivery before removing them.");
+    const [balance] = await tx<{ outstanding: number }[]>`SELECT COALESCE((SELECT SUM(payout_minor) FROM delivery_assignments WHERE rider_id=${id} AND status='DELIVERED'),0)-COALESCE((SELECT SUM(amount_minor) FROM driver_payouts WHERE rider_id=${id} AND status='PAID'),0) AS outstanding`;
+    if (Number(balance.outstanding)>0) throw new Error("Pay this driver's outstanding earnings before removing them.");
+    await tx`UPDATE riders SET removed_at=now(),availability='OFFLINE',updated_at=now() WHERE id=${id}`;
+    await tx`UPDATE users SET status='DISABLED',updated_at=now() WHERE id=${rider.user_id}`;
+    await tx`INSERT INTO admin_activity_logs(actor_user_id,action,entity_type,entity_id,metadata) VALUES(${admin.id},'rider.removed','rider',${id},${tx.json({historyPreserved:true})})`;
+  });
+  revalidatePath("/admin/riders");
+  revalidatePath("/admin/orders");
+}
+
 export async function setRiderStatus(riderId: string, enabled: boolean) {
   const admin = await requireAdministrator();
   const [rider] = await sql<
     { user_id: string }[]
-  >`UPDATE riders SET availability='OFFLINE', updated_at=now() WHERE id=${idSchema.parse(riderId)} RETURNING user_id`;
+  >`UPDATE riders SET availability='OFFLINE', updated_at=now() WHERE id=${idSchema.parse(riderId)} AND removed_at IS NULL RETURNING user_id`;
   if (rider)
     await sql`UPDATE users SET status=${enabled ? "ACTIVE" : "DISABLED"}::user_status, updated_at=now() WHERE id=${rider.user_id}`;
   await audit(

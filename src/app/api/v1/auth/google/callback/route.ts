@@ -26,6 +26,10 @@ export async function GET(request: NextRequest) {
     response.cookies.delete("tipsy_google_verifier");
     return response;
   } catch (error) {
-    return apiErrorResponse(error);
+    apiErrorResponse(error);
+    const response = NextResponse.redirect(new URL("/signin?authError=google", request.url));
+    response.cookies.delete("tipsy_google_state");
+    response.cookies.delete("tipsy_google_verifier");
+    return response;
   }
 }

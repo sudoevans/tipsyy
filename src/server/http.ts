@@ -70,7 +70,7 @@ export function apiErrorResponse(
       errorType: error.name,
     }));
     return NextResponse.json(
-      { error: { code: error.code, message: error.message, details: error.details, requestId } },
+      { error: { code: error.code, message: error.status >= 500 ? "We couldn't complete this right now. Please try again shortly or contact support." : error.message, ...(error.status < 500 ? { details: error.details } : {}), requestId } },
       { status: error.status, headers: { "x-request-id": requestId } },
     );
   }

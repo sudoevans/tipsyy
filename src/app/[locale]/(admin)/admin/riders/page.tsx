@@ -128,6 +128,7 @@ export default async function RidersPage({
       FROM riders r
       JOIN users u ON u.id = r.user_id
       LEFT JOIN delivery_assignments da ON da.rider_id = r.id
+      WHERE r.removed_at IS NULL
       GROUP BY r.id,u.id
       ORDER BY delivered DESC,u.display_name NULLS LAST
     `,
