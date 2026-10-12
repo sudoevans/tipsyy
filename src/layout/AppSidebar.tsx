@@ -118,8 +118,10 @@ export default function AppSidebar({ displayName, role }: { displayName?: string
   const [signingOut, setSigningOut] = useState(false);
   const expanded = isExpanded || isHovered || isMobileOpen;
   useEffect(() => {
-    if (pathname === "/admin/inventory" || pathname.startsWith("/admin/inventory/")) void markCategoryRead("inventory").catch(() => undefined);
-    else if (pathname === "/admin/transactions" || pathname.startsWith("/admin/transactions/")) void markCategoryRead("transactions").catch(() => undefined);
+    const section = pathname.replace(/^\/admin(?=\/|$)/, "").split("/")[1];
+    if (section === "inventory" || section === "transactions" || section === "orders" || section === "riders") {
+      void markCategoryRead(section).catch(() => undefined);
+    }
   }, [pathname, markCategoryRead]);
 
   const signOut = async () => {
@@ -156,7 +158,7 @@ export default function AppSidebar({ displayName, role }: { displayName?: string
           {expanded ? (
             <span className="flex items-center gap-2.5">
               <Image
-                src="/images/logo/tipsyy-icon.svg"
+                src="/images/logo/admin-logo.svg"
                 alt=""
                 width={32}
                 height={32}
@@ -168,7 +170,7 @@ export default function AppSidebar({ displayName, role }: { displayName?: string
             </span>
           ) : (
             <Image
-              src="/images/logo/tipsyy-icon.svg"
+              src="/images/logo/admin-logo.svg"
               alt="Tipsy Theoryy admin"
               width={32}
               height={32}

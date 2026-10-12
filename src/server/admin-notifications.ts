@@ -186,8 +186,18 @@ export async function markAllAdminNotificationsRead(userId: string) {
 
 export async function markAdminNotificationsReadByCategory(
   userId: string,
-  category: "inventory" | "transactions",
+  category: "inventory" | "transactions" | "orders" | "riders",
 ) {
+  if (category === "orders" || category === "riders") {
+    await sql`
+      UPDATE admin_notification_recipients r SET read_at = now()
+      FROM admin_notifications n
+      WHERE n.id = r.notification_id AND r.user_id = ${userId}
+        AND r.read_at IS NULL
+        AND split_part(regexp_replace(n.href, '^/admin(/|$)', '/'), '/', 2) = ${category}
+    `;
+    return;
+  }
   if (category === "inventory") {
     await sql`
       UPDATE admin_notification_recipients r SET read_at = now()

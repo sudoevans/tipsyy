@@ -32,7 +32,7 @@ type NotificationsContextValue = {
   loadMore: () => Promise<void>;
   markRead: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
-  markCategoryRead: (category: "inventory" | "transactions") => Promise<void>;
+  markCategoryRead: (category: "inventory" | "transactions" | "orders" | "riders") => Promise<void>;
   soundEnabled: boolean;
   setSoundEnabled: (enabled: boolean) => void;
 };
@@ -180,16 +180,19 @@ export function AdminNotificationsProvider({
     }
   }, [refresh, persistRead]);
 
-  const markCategoryRead = useCallback(async (category: "inventory" | "transactions") => {
+  const markCategoryRead = useCallback(async (category: "inventory" | "transactions" | "orders" | "riders") => {
     const relevant = (item: AdminNotification) => category === "inventory"
       ? item.entity_type === "inventory_variant"
-      : item.event_type.startsWith("MPESA_") || item.event_type.startsWith("PAYMENT_") || item.event_type.startsWith("UNMATCHED_MPESA") || ["DUPLICATE_MPESA_RECEIPT", "STK_RECEIPT_AFTER_QUERY_MISMATCH", "PULLED_MPESA_RECEIPT_REVIEW"].includes(item.event_type);
+      : category === "orders" || category === "riders"
+        ? (item.href ?? "").replace(/^\/admin(?=\/|$)/, "").split("/")[1] === category
+        : item.event_type.startsWith("MPESA_") || item.event_type.startsWith("PAYMENT_") || item.event_type.startsWith("UNMATCHED_MPESA") || ["DUPLICATE_MPESA_RECEIPT", "STK_RECEIPT_AFTER_QUERY_MISMATCH", "PULLED_MPESA_RECEIPT_REVIEW"].includes(item.event_type);
     setNotifications((current) => current.map((item) => relevant(item) ? { ...item, read_at: item.read_at ?? new Date().toISOString() } : item));
     setSummary((current) => category === "inventory"
       ? { ...current, unread: Math.max(0, current.unread - current.lowStock), lowStock: 0 }
-      : { ...current, unread: Math.max(0, current.unread - current.openInvestigations), openInvestigations: 0 });
+      : category === "transactions" ? { ...current, unread: Math.max(0, current.unread - current.openInvestigations), openInvestigations: 0 } : current);
     try {
       await persistRead(category, { markCategory: category });
+      await refresh();
     } catch (error) {
       await refresh();
       throw error;
