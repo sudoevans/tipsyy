@@ -1,10 +1,8 @@
 "use client";
 
 import {
-  ChartBreakoutSquareIcon,
   CheckCircleIcon,
   Copy01Icon,
-  DotsVerticalIcon,
   SearchLgIcon,
   Truck01Icon,
   UserPlus01Icon,
@@ -19,10 +17,12 @@ import {
   createFleetVehicle,
   recordDriverPayout,
   setRiderStatus,
+  removeRider,
 } from "@/app/[locale]/(admin)/admin/actions";
 import { useAdminToast } from "@/components/admin/AdminToast";
 import AdminSelect from "@/components/admin/AdminSelect";
 import Badge from "@/components/ui/badge/Badge";
+import AdminTableActionsMenu from "@/components/admin/AdminTableActionsMenu";
 import AdminPagination from "@/components/admin/AdminPagination";
 import ComponentCard from "@/components/common/ComponentCard";
 import Input from "@/components/form/input/InputField";
@@ -467,6 +467,9 @@ export default function DriverOperations({
                     pending={pending}
                     onCopy={copyPhone}
                     onView={() => setActivityDriver(driver)}
+                    onRemove={() => {
+                      if (window.confirm(`Remove ${driver.name} from the driver roster? They will lose access. Delivery and payout history will be preserved. This action is recorded in Activity.`)) run("Driver removed", () => removeRider(driver.id));
+                    }}
                     onStatus={(enabled) =>
                       run(
                         enabled ? "Driver reactivated" : "Driver offboarded",
@@ -862,11 +865,11 @@ function Metric({
 function DriverRow({
   driver,
   rank,
-  openUp,
   pending,
   onCopy,
   onView,
   onStatus,
+  onRemove,
 }: {
   driver: Driver;
   rank: number;
@@ -875,6 +878,7 @@ function DriverRow({
   onCopy: (phone: string) => void;
   onView: () => void;
   onStatus: (enabled: boolean) => void;
+  onRemove: () => void;
 }) {
   const balance = Math.max(0, driver.earned - driver.paid);
   const visibleStatus =
@@ -939,33 +943,13 @@ function DriverRow({
         </Badge>
       </td>
       <td className="px-5 py-4 text-right">
-        <details className="relative inline-block text-left">
-          <summary className="inline-flex size-9 cursor-pointer list-none items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-white/5 [&::-webkit-details-marker]:hidden">
-            <DotsVerticalIcon className="size-4" />
-          </summary>
-          <div
-            className={`absolute right-0 z-30 w-44 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-theme-md dark:border-gray-700 dark:bg-gray-900 ${openUp ? "bottom-full mb-1" : "mt-1"}`}
-          >
-            <button
-              type="button"
-              onClick={onView}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-white/5"
-            >
-              <ChartBreakoutSquareIcon className="size-4" />
-              View activity
-            </button>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => onStatus(driver.userStatus !== "ACTIVE")}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-error-600 hover:bg-error-50 disabled:opacity-50"
-            >
-              {driver.userStatus === "ACTIVE"
-                ? "Offboard driver"
-                : "Reactivate driver"}
-            </button>
-          </div>
-        </details>
+        <AdminTableActionsMenu label={`Actions for ${driver.name}`} items={[
+          { label: "View activity", onSelect: onView },
+          ...(!pending ? [
+            { label: driver.userStatus === "ACTIVE" ? "Offboard driver" : "Reactivate driver", tone: "danger" as const, onSelect: () => { if (window.confirm("Change this driver's access? This action is recorded in Activity.")) onStatus(driver.userStatus !== "ACTIVE"); } },
+            { label: "Remove driver", tone: "danger" as const, onSelect: onRemove },
+          ] : []),
+        ]} />
       </td>
     </tr>
   );

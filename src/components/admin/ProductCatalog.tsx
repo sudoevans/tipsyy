@@ -200,7 +200,7 @@ export default function ProductCatalog({
               <button
                 disabled={pending}
                 onClick={() =>
-                  run("Products archived", () =>
+                  !window.confirm("Archive the selected products? They will disappear from the storefront and inventory. History is preserved and this action is recorded in Activity.") ? undefined : run("Products archived", () =>
                     setProductsActive([...selected], false),
                   )
                 }
@@ -397,7 +397,7 @@ function ProductRow({
               tone: "danger",
               icon: <ArchiveIcon className="size-4" />,
               onSelect: () =>
-                onRun(
+                (product.active && !window.confirm("Archive this product? It will disappear from the storefront and inventory. Order history is preserved and this action is recorded in Activity.")) ? undefined : onRun(
                   product.active ? "Product archived" : "Product published",
                   () => setProductActive(product.id, !product.active),
                 ),

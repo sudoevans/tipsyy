@@ -580,11 +580,29 @@ export async function createRider(formData: FormData) {
   revalidatePath("/admin/delivery");
 }
 
+export async function removeRider(riderId: string) {
+  const admin = await requireAdministrator();
+  const id = idSchema.parse(riderId);
+  await sql.begin(async (tx) => {
+    const [rider] = await tx<{user_id: string; removed_at: Date | null}[]>`SELECT user_id,removed_at FROM riders WHERE id=${id} FOR UPDATE`;
+    if (!rider || rider.removed_at) return;
+    const [active] = await tx`SELECT id FROM delivery_assignments WHERE rider_id=${id} AND status IN ('ASSIGNED','ACCEPTED','PICKED_UP') LIMIT 1`;
+    if (active) throw new Error("Complete or reassign this driver's active delivery before removing them.");
+    const [balance] = await tx<{ outstanding: number }[]>`SELECT COALESCE((SELECT SUM(payout_minor) FROM delivery_assignments WHERE rider_id=${id} AND status='DELIVERED'),0)-COALESCE((SELECT SUM(amount_minor) FROM driver_payouts WHERE rider_id=${id} AND status='PAID'),0) AS outstanding`;
+    if (Number(balance.outstanding)>0) throw new Error("Pay this driver's outstanding earnings before removing them.");
+    await tx`UPDATE riders SET removed_at=now(),availability='OFFLINE',updated_at=now() WHERE id=${id}`;
+    await tx`UPDATE users SET status='DISABLED',updated_at=now() WHERE id=${rider.user_id}`;
+    await tx`INSERT INTO admin_activity_logs(actor_user_id,action,entity_type,entity_id,metadata) VALUES(${admin.id},'rider.removed','rider',${id},${tx.json({historyPreserved:true})})`;
+  });
+  revalidatePath("/admin/riders");
+  revalidatePath("/admin/orders");
+}
+
 export async function setRiderStatus(riderId: string, enabled: boolean) {
   const admin = await requireAdministrator();
   const [rider] = await sql<
     { user_id: string }[]
-  >`UPDATE riders SET availability='OFFLINE', updated_at=now() WHERE id=${idSchema.parse(riderId)} RETURNING user_id`;
+  >`UPDATE riders SET availability='OFFLINE', updated_at=now() WHERE id=${idSchema.parse(riderId)} AND removed_at IS NULL RETURNING user_id`;
   if (rider)
     await sql`UPDATE users SET status=${enabled ? "ACTIVE" : "DISABLED"}::user_status, updated_at=now() WHERE id=${rider.user_id}`;
   await audit(
