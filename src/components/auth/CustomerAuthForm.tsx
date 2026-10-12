@@ -5,14 +5,14 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import BrandLogo from "@/components/storefront/BrandLogo";
 
-export default function CustomerAuthForm({ mode }: { mode: "signin" | "signup" }) {
+export default function CustomerAuthForm({ mode, initialError = "" }: { mode: "signin" | "signup"; initialError?: string }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [stage, setStage] = useState<"phone" | "code">("phone");
   const [isBusy, setIsBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();

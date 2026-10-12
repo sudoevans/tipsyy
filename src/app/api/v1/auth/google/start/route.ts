@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { createGoogleAuthorization } from "@/server/auth";
 import { apiErrorResponse } from "@/server/http";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const authorization = createGoogleAuthorization();
     const response = NextResponse.redirect(authorization.url);
@@ -12,6 +12,7 @@ export async function GET() {
     response.cookies.set("tipsy_google_verifier", authorization.verifier, cookie);
     return response;
   } catch (error) {
-    return apiErrorResponse(error);
+    apiErrorResponse(error);
+    return NextResponse.redirect(new URL("/signin?authError=google", request.url));
   }
 }
