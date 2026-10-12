@@ -7,7 +7,7 @@ import { ApiError } from "./http";
 import { createOpaqueToken, hashSecret } from "./security";
 
 const scrypt = promisify(scryptCallback);
-const ADMIN_SESSION_HOURS = 12;
+const ADMIN_SESSION_MINUTES = 15;
 
 export const adminLoginSchema = z.object({
   username: z.string().trim().toLowerCase().min(3).max(64).regex(/^[a-z0-9._-]+$/),
@@ -47,7 +47,7 @@ export async function loginAdmin(input: z.infer<typeof adminLoginSchema>) {
     }
     await sql`UPDATE admin_credentials SET failed_attempts = 0, locked_until = NULL, updated_at = now() WHERE user_id = ${account.id}`;
     const token = createOpaqueToken();
-    const expiresAt = new Date(Date.now() + ADMIN_SESSION_HOURS * 60 * 60_000);
+    const expiresAt = new Date(Date.now() + ADMIN_SESSION_MINUTES * 60_000);
     await sql`INSERT INTO admin_sessions (user_id, token_hash, expires_at) VALUES (${account.id}, ${hashSecret(token)}, ${expiresAt})`;
     await sql`
       INSERT INTO admin_activity_logs (actor_user_id, action, entity_type, entity_id, metadata)

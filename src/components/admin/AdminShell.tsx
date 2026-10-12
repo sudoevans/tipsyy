@@ -4,12 +4,14 @@ import { useSidebar } from "@/context/SidebarContext";
 import AppHeader from "@/layout/AppHeader";
 import AppSidebar from "@/layout/AppSidebar";
 import Backdrop from "@/layout/Backdrop";
+import AdminIdleTimeout from "./AdminIdleTimeout";
 
 export default function AdminShell({ children, displayName, role }: { children: React.ReactNode; displayName?: string | null; role?: string | null }) {
   const { isExpanded, isHovered, isMobileOpen } = useSidebar();
   const margin = isMobileOpen ? "ml-0" : isExpanded || isHovered ? "xl:ml-[290px]" : "xl:ml-[90px]";
   return (
     <div className="admin-typography min-h-screen xl:flex">
+      <AdminIdleTimeout />
       <AppSidebar displayName={displayName} role={role} />
       <Backdrop />
       <div className={`min-w-0 flex-1 transition-all duration-300 ease-in-out ${margin}`}>
