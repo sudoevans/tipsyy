@@ -2,7 +2,7 @@ import { getServerEnv } from "./env";
 import { sql, type Database, type Transaction } from "./db";
 import { decryptPlatformSecret } from "./security";
 
-interface NotificationRow { id: string; channel: string; destination: string; subject: string | null; body: string; attempts: number }
+interface NotificationRow { id: string; channel: string; event_type: string | null; destination: string; subject: string | null; body: string; attempts: number }
 
 class TelegramDeliveryError extends Error {}
 
@@ -63,7 +63,7 @@ export async function enqueueTelegramAlert(
   `;
 }
 
-export async function sendTelegramMessage(chatId: string, text: string) {
+export async function sendTelegramMessage(chatId: string, text: string, buttons: { text: string; url: string }[][] = []) {
   const [setting] = await sql<{ value: { botTokenEncrypted?: string } }[]>`
     SELECT value FROM platform_settings WHERE key='notifications.telegram'
   `;
@@ -75,7 +75,7 @@ export async function sendTelegramMessage(chatId: string, text: string) {
   const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text: text.length > 4000 ? `${text.slice(0, 3999)}…` : text, disable_web_page_preview: true }),
+    body: JSON.stringify({ chat_id: chatId, text: text.length > 4000 ? `${text.slice(0, 3999)}…` : text, disable_web_page_preview: true, ...(buttons.length ? { reply_markup: { inline_keyboard: buttons } } : {}) }),
     cache: "no-store",
     signal: AbortSignal.timeout(10_000),
   });
@@ -97,7 +97,23 @@ export async function sendTelegramMessage(chatId: string, text: string) {
 async function deliver(notification: NotificationRow) {
   if (notification.channel === "IN_APP") return { providerMessageId: null };
   if (notification.channel === "TELEGRAM") {
-    const providerMessageId = await sendTelegramMessage(notification.destination, [notification.subject, notification.body].filter(Boolean).join("\n"));
+    const buttons: { text: string; url: string }[][] = [];
+    const body = notification.body.split("\n").filter((line) => {
+      const match = line.match(/^(View in Admin|WhatsApp customer): (https?:\/\/\S+)$/);
+      if (!match) return true;
+      try {
+        const url = new URL(match[2]);
+        if (match[1] === "WhatsApp customer" && (url.protocol !== "https:" || url.hostname !== "wa.me")) return true;
+        if (match[1] === "View in Admin") {
+          const app = new URL(getServerEnv().APP_URL);
+          const host = ["localhost", "127.0.0.1"].includes(app.hostname) || app.hostname.startsWith("admin.") ? app.hostname : `admin.${app.hostname}`;
+          if (url.hostname !== host || !["http:", "https:"].includes(url.protocol)) return true;
+        }
+        buttons.push([{ text: match[1] === "View in Admin" ? "View order in Admin" : "WhatsApp customer", url: url.toString() }]);
+        return false;
+      } catch { return true; }
+    }).join("\n").trim();
+    const providerMessageId = await sendTelegramMessage(notification.destination, [notification.subject, body].filter(Boolean).join("\n"), buttons);
     return { providerMessageId: providerMessageId === null ? null : String(providerMessageId) };
   }
   const env = getServerEnv();
@@ -118,6 +134,8 @@ async function deliver(notification: NotificationRow) {
 
 export async function dispatchPendingNotifications(limit = 50) {
   const batchSize = Math.max(1, Math.min(8, Math.trunc(limit) || 1));
+  // Old pending-order alerts must not leak out after the paid-only rollout.
+  await sql`UPDATE notifications SET status='FAILED',locked_at=NULL,last_error='Suppressed: unpaid-order alerts are disabled.' WHERE channel='TELEGRAM' AND event_type='ORDER_CREATED' AND status IN ('PENDING','PROCESSING')`;
   const pending = await sql<NotificationRow[]>`
     WITH candidates AS (
       SELECT id FROM notifications
@@ -127,7 +145,7 @@ export async function dispatchPendingNotifications(limit = 50) {
     )
     UPDATE notifications n SET status = 'PROCESSING', locked_at = now()
     FROM candidates c WHERE n.id = c.id
-    RETURNING n.id, n.channel, n.destination, n.subject, n.body, n.attempts
+    RETURNING n.id, n.channel, n.event_type, n.destination, n.subject, n.body, n.attempts
   `;
   let sent = 0;
   let failed = 0;
