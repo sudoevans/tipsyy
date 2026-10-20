@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --experimental-default-type=module --test tests/delivery-distance.test.mts tests/payment-receipt-match.test.mts",
+    "test": "node --experimental-strip-types --experimental-default-type=module --test tests/delivery-distance.test.mts tests/payment-receipt-match.test.mts tests/blessedtexts-response.test.mts tests/otp-sms-claim.test.mts",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:seed": "node scripts/db-seed.mjs",
     "db:setup": "npm run db:migrate && npm run db:seed",

@@ -6,12 +6,18 @@ import { CART_COOKIE } from "@/server/cart-cookie";
 import { apiErrorResponse, parseJson } from "@/server/http";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { setSessionCookie } from "@/server/session-cookie";
+import { hashSecret, normalizeKenyanPhone } from "@/server/security";
 
 export async function POST(request: NextRequest) {
   try {
     const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
-    await enforceRateLimit(`otp-verify:${forwarded}`, 15, 600);
-    const user = await verifyOtp(await parseJson(request, verifyOtpSchema));
+    const input = await parseJson(request, verifyOtpSchema);
+    const phone = normalizeKenyanPhone(input.phone);
+    await Promise.all([
+      enforceRateLimit(`otp-verify-ip:${forwarded}`, 15, 600),
+      enforceRateLimit(`otp-verify-phone:${hashSecret(phone)}`, 10, 600),
+    ]);
+    const user = await verifyOtp(input);
     await mergeGuestCartToUser(request.cookies.get(CART_COOKIE)?.value, user.id);
     const session = await createSession(user.id);
     const response = NextResponse.json({ data: { user: { id: user.id, phone: user.phone, displayName: user.display_name } } });

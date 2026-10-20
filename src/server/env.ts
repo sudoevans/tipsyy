@@ -24,6 +24,8 @@ const baseSchema = z.object({
   MPESA_TRANSACTION_STATUS_TIMEOUT_URL: optionalString(z.string().url()),
   OTP_PROVIDER_URL: optionalString(z.string().url()),
   OTP_PROVIDER_TOKEN: optionalString(z.string().min(1)),
+  BLESSEDTEXTS_API_KEY: optionalString(z.string().min(1)),
+  BLESSEDTEXTS_SENDER_ID: z.string().min(1).max(20).default("NETWIX_GRID"),
   OTP_SENDER_ID: z.string().min(1).max(20).default("TipsyTheory"),
   TELEGRAM_BOT_TOKEN: optionalString(z.string().min(1)),
   GOOGLE_CLIENT_ID: optionalString(z.string().min(1)),

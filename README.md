@@ -12,7 +12,7 @@ npm run db:setup
 npm run dev
 ```
 
-The application intentionally fails closed for M-Pesa, OTP, Google OAuth, and internal worker calls until their real credentials are configured in `.env.local` from `.env.example`.
+The application intentionally fails closed for M-Pesa, BlessedTexts OTP, Google OAuth, and internal worker calls until their real credentials are configured in `.env.local` from `.env.example`.
 
 ## TipsyAdmin
 

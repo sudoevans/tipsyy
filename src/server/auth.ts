@@ -2,11 +2,12 @@ import { createHash } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { z } from "zod";
 
+import { dispatchOtpSms } from "./otp-sms";
 import { sql, withTransaction } from "./db";
 import { getServerEnv } from "./env";
 import { ApiError } from "./http";
 import { claimPendingLoyaltyPoints } from "./loyalty";
-import { createNumericCode, createOpaqueToken, hashSecret, normalizeKenyanPhone, safeSecretEqual } from "./security";
+import { createNumericCode, createOpaqueToken, encryptPlatformSecret, hashSecret, normalizeKenyanPhone, safeSecretEqual } from "./security";
 
 export const requestOtpSchema = z.object({
   phone: z.string().min(9).max(25),
@@ -24,45 +25,34 @@ export const verifyOtpSchema = z.object({
 
 const SESSION_DAYS = 30;
 
-async function sendOtp(phone: string, code: string) {
-  const env = getServerEnv();
-  if (!env.OTP_PROVIDER_URL || !env.OTP_PROVIDER_TOKEN) {
-    throw new ApiError(503, "OTP_PROVIDER_NOT_CONFIGURED", "Phone verification is not configured yet.");
-  }
-  const response = await fetch(env.OTP_PROVIDER_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${env.OTP_PROVIDER_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      to: phone,
-      senderId: env.OTP_SENDER_ID,
-      message: `${code} is your Tipsy Theoryy verification code. It expires in 5 minutes.`,
-    }),
-    cache: "no-store",
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (!response.ok) throw new ApiError(502, "OTP_DELIVERY_FAILED", "We could not send the verification code. Please try again.");
-}
-
-export async function requestOtp(input: z.infer<typeof requestOtpSchema>, requestIp?: string) {
+export async function requestOtp(input: z.infer<typeof requestOtpSchema>, requestIp?: string, requestId = crypto.randomUUID()) {
   const phone = normalizeKenyanPhone(input.phone);
   const code = createNumericCode();
   const expiresAt = new Date(Date.now() + 5 * 60_000);
-  const [otp] = await sql<{ id: string }[]>`
-    INSERT INTO phone_otps (phone, purpose, code_hash, expires_at, request_ip)
-    VALUES (${phone}, ${input.purpose}, ${hashSecret(`${phone}:${input.purpose}:${code}`)}, ${expiresAt}, ${requestIp ?? null})
-    RETURNING id
-  `;
-  try {
-    await sendOtp(phone, code);
-    await sql`
-      INSERT INTO notifications (channel, event_type, destination, subject, body, status, attempts, sent_at)
-      VALUES ('SMS', 'OTP_SENT', ${phone}, 'Verification code sent', 'A phone verification code was sent.', 'SENT', 1, now())
+  const maskedPhone = `0${phone.slice(3, 6)} *** ${phone.slice(-3)}`;
+  const [message] = await withTransaction(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`${phone}:${input.purpose}`},0))`;
+    await tx`UPDATE phone_otps SET consumed_at=now()
+      WHERE phone=${phone} AND purpose=${input.purpose} AND consumed_at IS NULL`;
+    await tx`UPDATE otp_sms_messages SET status='SUPERSEDED',encrypted_body=NULL,locked_at=NULL,updated_at=now()
+      WHERE otp_id IN (SELECT id FROM phone_otps WHERE phone=${phone} AND purpose=${input.purpose})
+        AND status IN ('PENDING','UNKNOWN','PROCESSING')`;
+    const [otp] = await tx<{ id: string }[]>`
+      INSERT INTO phone_otps (phone, purpose, code_hash, expires_at, request_ip)
+      VALUES (${phone}, ${input.purpose}, ${hashSecret(`${phone}:${input.purpose}:${code}`)}, ${expiresAt}, ${requestIp ?? null})
+      RETURNING id
     `;
-  } catch (error) {
-    await sql`DELETE FROM phone_otps WHERE id = ${otp.id}`;
-    throw error;
-  }
-  return { sent: true, expiresAt: expiresAt.toISOString(), maskedPhone: `0${phone.slice(3, 6)} *** ${phone.slice(-3)}` };
+    return tx<{ id: string }[]>`
+      INSERT INTO otp_sms_messages(otp_id,request_id,phone_masked,purpose,encrypted_body)
+      VALUES(${otp.id},${requestId},${maskedPhone},${input.purpose},
+        ${encryptPlatformSecret(`${code} is your Tipsy Theoryy verification code. It expires in 5 minutes.`)})
+      RETURNING id
+    `;
+  });
+  console.info(JSON.stringify({ level: "info", service: "blessedtexts_otp", event: "otp_sms.queued", smsId: message.id, requestId }));
+  const status = await dispatchOtpSms(message.id);
+  if (status === "FAILED") throw new ApiError(503, "OTP_SEND_FAILED", "We could not send the code. Please try again later.");
+  return { sent: status === "SENT", pending: status !== "SENT", expiresAt: expiresAt.toISOString(), maskedPhone };
 }
 
 export async function createSession(userId: string) {
@@ -74,7 +64,7 @@ export async function createSession(userId: string) {
 
 export async function verifyOtp(input: z.infer<typeof verifyOtpSchema>) {
   const phone = normalizeKenyanPhone(input.phone);
-  return withTransaction(async (tx) => {
+  const outcome = await withTransaction(async (tx) => {
     const [otp] = await tx<{
       id: string;
       code_hash: string;
@@ -95,7 +85,7 @@ export async function verifyOtp(input: z.infer<typeof verifyOtpSchema>) {
     const matches = safeSecretEqual(`${phone}:${input.purpose}:${input.code}`, otp.code_hash);
     if (!matches) {
       await tx`UPDATE phone_otps SET attempts = attempts + 1 WHERE id = ${otp.id}`;
-      throw new ApiError(422, "OTP_INCORRECT", "That verification code is incorrect.", { attemptsRemaining: otp.max_attempts - otp.attempts - 1 });
+      return { kind: "incorrect" as const, attemptsRemaining: otp.max_attempts - otp.attempts - 1 };
     }
     await tx`UPDATE phone_otps SET consumed_at = now() WHERE id = ${otp.id}`;
 
@@ -121,8 +111,10 @@ export async function verifyOtp(input: z.infer<typeof verifyOtpSchema>) {
       if (attached[0]) await tx`UPDATE notifications SET user_id = ${user.id} WHERE order_id = ${attached[0].id} AND user_id IS NULL`;
     }
     await claimPendingLoyaltyPoints(tx, user.id, phone);
-    return user;
+    return { kind: "verified" as const, user };
   });
+  if (outcome.kind === "incorrect") throw new ApiError(422, "OTP_INCORRECT", "That verification code is incorrect.", { attemptsRemaining: outcome.attemptsRemaining });
+  return outcome.user;
 }
 
 export async function getUserFromSession(rawToken: string | undefined) {
