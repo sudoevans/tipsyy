@@ -701,22 +701,31 @@ export async function recordDriverPayout(formData: FormData) {
     `;
     let remaining = amount;
     const settled: string[] = [];
-    let count = 0;
+    const allocations: { assignment_id: string; amount_minor: number }[] = [];
     for (const assignment of assignments) {
       const allocated = Math.min(remaining, assignment.payout_minor);
       if (allocated <= 0) continue;
-      await tx`
-        INSERT INTO driver_payout_items (payout_id,assignment_id,amount_minor)
-        VALUES (${payout.id},${assignment.id},${allocated})
-      `;
-      count += 1;
+      allocations.push({ assignment_id: assignment.id, amount_minor: allocated });
       remaining -= allocated;
       if (allocated === assignment.payout_minor) settled.push(assignment.id);
     }
     await tx`
+      INSERT INTO driver_payout_items (payout_id,assignment_id,amount_minor)
+      SELECT ${payout.id},allocation.assignment_id,allocation.amount_minor
+      FROM jsonb_to_recordset(${tx.json(allocations)}::jsonb)
+        AS allocation(assignment_id uuid,amount_minor integer)
+    `;
+    const count = allocations.length;
+    await tx`
       UPDATE delivery_assignments
       SET payout_status = 'PAID', payout_paid_at = now()
       WHERE id = ANY(${settled})
+    `;
+    await tx`
+      INSERT INTO admin_activity_logs(actor_user_id,action,entity_type,entity_id,metadata)
+      VALUES(${admin.id},'driver_payout.recorded','driver_payout',${payout.id},
+        ${tx.json({ riderId: input.riderId, periodStart: input.periodStart, periodEnd: input.periodEnd,
+          amount, deliveries: count, reference })})
     `;
     return {
       amount,
@@ -725,20 +734,6 @@ export async function recordDriverPayout(formData: FormData) {
       reference,
     };
   });
-  await audit(
-    admin.id,
-    "driver_payout.recorded",
-    "driver_payout",
-    result.payoutId,
-    {
-      riderId: input.riderId,
-      periodStart: input.periodStart,
-      periodEnd: input.periodEnd,
-      amount: result.amount,
-      deliveries: result.count,
-      reference: result.reference,
-    },
-  );
   revalidatePath("/admin/riders");
   revalidatePath("/admin/delivery");
   revalidatePath("/admin/finance");
