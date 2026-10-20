@@ -27,10 +27,11 @@ export async function enqueueTelegramAlert(
   const config = setting?.value;
   if (!config?.chatId || !config.events?.[input.eventType]) return;
   let body = input.body;
+  const title = input.eventType === "ORDER_PAID" ? `✅ ${input.title}` : input.title;
   if (input.entityType === "order") {
     const [order] = await tx<{
       order_number: string; customer_name: string; customer_phone: string;
-      delivery_address: { addressLine?: string }; delivery_instructions: string | null;
+      delivery_address: { addressLine?: string; latitude?: number; longitude?: number }; delivery_instructions: string | null;
       total_minor: number; status: string; created_at: Date;
     }[]>`SELECT order_number,customer_name,customer_phone,delivery_address,delivery_instructions,total_minor,status::text,created_at FROM orders WHERE id=${input.entityId}`;
     if (order) {
@@ -44,9 +45,16 @@ export async function enqueueTelegramAlert(
       adminUrl.pathname = `${local ? "/admin" : ""}/orders/${encodeURIComponent(order.order_number)}`;
       adminUrl.search = "";
       adminUrl.hash = "";
+      const latitude = order.delivery_address?.latitude;
+      const longitude = order.delivery_address?.longitude;
+      const hasCoordinates = typeof latitude === "number" && Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
+        && typeof longitude === "number" && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
+      const location = hasCoordinates
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`
+        : "N/A";
       body = [
-        `Order: ${order.order_number}`, `Customer: ${order.customer_name}`, `Phone: ${order.customer_phone}`,
-        `Location: ${order.delivery_address?.addressLine ?? "—"}`,
+        `📦 Order: ${order.order_number}`, `Customer: ${order.customer_name}`, `📞 Phone: ${order.customer_phone}`,
+        `📍 Location: ${location}`,
         order.delivery_instructions ? `Delivery notes: ${order.delivery_instructions}` : null,
         "", "Items:", ...items.map((item) => `• ${item.product_name}${item.size_label ? ` (${item.size_label})` : ""} ×${item.quantity} — ${amount(item.line_total_minor)}`),
         "", `Total: ${amount(order.total_minor)}`, `Status: ${order.status.replaceAll("_", " ")}`,
@@ -58,7 +66,7 @@ export async function enqueueTelegramAlert(
   const dedupKey = `${input.eventType}:${input.entityType}:${input.entityId}`;
   await tx`
     INSERT INTO notifications(channel,event_type,destination,subject,body,dedup_key)
-    VALUES('TELEGRAM',${input.eventType},${config.chatId},${input.title},${body},${dedupKey})
+    VALUES('TELEGRAM',${input.eventType},${config.chatId},${title},${body},${dedupKey})
     ON CONFLICT(dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING
   `;
 }
@@ -113,7 +121,7 @@ async function deliver(notification: NotificationRow) {
         return false;
       } catch { return true; }
     }).join("\n").trim();
-    const providerMessageId = await sendTelegramMessage(notification.destination, [notification.subject, body].filter(Boolean).join("\n"), buttons);
+    const providerMessageId = await sendTelegramMessage(notification.destination, [notification.subject, body].filter(Boolean).join("\n\n"), buttons);
     return { providerMessageId: providerMessageId === null ? null : String(providerMessageId) };
   }
   const env = getServerEnv();

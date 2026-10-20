@@ -27,9 +27,10 @@ export default function PostPurchaseAccount({ accessToken, displayName, onMessag
     setState("sending");
     setError("");
     try {
-      await apiRequest("/api/v1/auth/otp/request", { phone, purpose: "CREATE_ACCOUNT" });
+      const delivery = await apiRequest<{ sent: boolean; pending?: boolean }>("/api/v1/auth/otp/request", { phone, purpose: "CREATE_ACCOUNT" });
       setState("verify");
-      onMessage("Verification code sent", "Enter the six-digit code sent to your phone.");
+      onMessage(delivery.sent ? "Verification code sent" : "Code delivery pending",
+        delivery.sent ? "Enter the six-digit code sent to your phone." : "If a code arrives, enter it here. Otherwise try again shortly.");
     } catch (requestError) {
       setState("idle");
       setError(requestError instanceof Error ? requestError.message : "The code could not be sent.");

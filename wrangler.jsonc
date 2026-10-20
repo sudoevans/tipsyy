@@ -33,7 +33,8 @@
     "MPESA_TRANSACTION_TYPE": "CustomerPayBillOnline",
     "MPESA_ACCOUNT_REFERENCE": "TIPSYTHEORY",
     "MPESA_SHORTCODE": "4201723",
-    "OTP_SENDER_ID": "TipsyTheory"
+    "OTP_SENDER_ID": "TipsyTheory",
+    "BLESSEDTEXTS_SENDER_ID": "NETWIX_GRID"
   },
   "triggers": {
     "crons": ["* * * * *"]

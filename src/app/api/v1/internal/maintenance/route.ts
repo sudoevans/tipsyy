@@ -5,6 +5,7 @@ import { dispatchPendingNotifications } from "@/server/notifications";
 import { processOpenPaymentInvestigations } from "@/server/payment-reconciliation";
 import { reconcilePendingStkAttempts, retryUnprocessedMpesaCallbacks } from "@/server/payments";
 import { hashSecret, safeSecretEqual } from "@/server/security";
+import { dispatchPendingOtpSms } from "@/server/otp-sms";
 
 async function runMaintenanceTask<T>(name: string, work: () => Promise<T>) {
   try {
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
       runMaintenanceTask("payment_investigations", () => processOpenPaymentInvestigations(1)),
       runMaintenanceTask("stk_status_checks", () => reconcilePendingStkAttempts(1)),
       runMaintenanceTask("mpesa_callback_retries", () => retryUnprocessedMpesaCallbacks(5)),
+      runMaintenanceTask("blessedtexts_otp_retries", () => dispatchPendingOtpSms(4)),
     ]);
     return apiSuccess({ tasks, hasFailures: tasks.some((task) => !task.ok) });
   } catch (error) {

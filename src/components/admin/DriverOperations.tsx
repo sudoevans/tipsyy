@@ -15,7 +15,6 @@ import { useRouter } from "next/navigation";
 import {
   createRider,
   createFleetVehicle,
-  recordDriverPayout,
   setRiderStatus,
   removeRider,
 } from "@/app/[locale]/(admin)/admin/actions";
@@ -1171,6 +1170,17 @@ function RecordDriverPayoutDialog({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [orderQuery, setOrderQuery] = useState("");
+  const confirmRecordedPayout = async (requestId: string) => {
+    try {
+      const params = new URLSearchParams({ requestId, riderId: payment.riderId });
+      const response = await fetch(`/api/v1/admin/rider-payouts?${params}`, { cache: "no-store" });
+      if (!response.ok) return null;
+      const payload = await response.json() as { data?: { payout: { amount: number; count: number; reference: string } | null } };
+      return payload.data?.payout ?? null;
+    } catch {
+      return null;
+    }
+  };
   const filteredOrders = useMemo(() => {
     const query = orderQuery.trim().toLowerCase();
     if (!query) return payment.orders;
@@ -1187,7 +1197,27 @@ function RecordDriverPayoutDialog({
         paymentRequestId.current ??= crypto.randomUUID();
         const data = new FormData(form);
         data.set("requestId", paymentRequestId.current);
-        const result = await recordDriverPayout(data);
+        const response = await fetch("/api/v1/admin/rider-payouts", {
+          method: "POST",
+          body: data,
+          cache: "no-store",
+        });
+        const payload = await response.json().catch(() => null) as {
+          data?: { amount: number; count: number; reference: string };
+          error?: { message?: string; requestId?: string };
+        } | null;
+        if (response.status === 401) {
+          window.location.assign(window.location.hostname === "admin.tipsytheoryy.com" ? "/login?expired=1" : "/admin/login?expired=1");
+          return;
+        }
+        let result = payload?.data;
+        if ((!response.ok || !result) && paymentRequestId.current) {
+          result = await confirmRecordedPayout(paymentRequestId.current) ?? undefined;
+        }
+        if (!result) {
+          const reference = payload?.error?.requestId ?? response.headers.get("x-request-id");
+          throw new Error(`${payload?.error?.message ?? "We could not confirm this payout. Please try again."}${reference ? ` Support reference: ${reference}.` : ""}`);
+        }
         router.refresh();
         showToast({
           title: "Payment recorded",
@@ -1196,12 +1226,21 @@ function RecordDriverPayoutDialog({
         });
         onClose();
       } catch (error) {
+        if (paymentRequestId.current) {
+          const payout = await confirmRecordedPayout(paymentRequestId.current);
+          if (payout) {
+            router.refresh();
+            showToast({ title: "Payment recorded", description: `${money.format(payout.amount)} recorded for ${payment.riderName}.`, tone: "success" });
+            onClose();
+            return;
+          }
+        }
         showToast({
           title: "Could not record payout",
           description:
-            error instanceof Error
+            error instanceof Error && !error.message.includes("Minified React error")
               ? error.message
-              : "Review the payout period and try again.",
+              : "We could not confirm this payout. Please refresh the payment list before retrying.",
           tone: "error",
         });
       }
