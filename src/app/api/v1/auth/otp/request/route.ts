@@ -3,18 +3,19 @@ import { requestOtp, requestOtpSchema } from "@/server/auth";
 import { apiErrorResponse, apiSuccess, ApiError, parseJson } from "@/server/http";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { hashSecret, normalizeKenyanPhone } from "@/server/security";
+import { getClientIp } from "@/server/client-ip";
 
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
   try {
     const input = await parseJson(request, requestOtpSchema);
-    const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+    const clientIp = getClientIp(request.headers);
     const phone = normalizeKenyanPhone(input.phone);
     await Promise.all([
-      enforceRateLimit(`otp-ip:${forwarded}`, 8, 600),
+      enforceRateLimit(`otp-ip:${clientIp ?? "unknown"}`, 8, 600),
       enforceRateLimit(`otp-phone:${hashSecret(phone)}`, 4, 600),
     ]);
-    return apiSuccess(await requestOtp(input, forwarded, requestId), { status: 202, headers: { "x-request-id": requestId } });
+    return apiSuccess(await requestOtp(input, clientIp ?? undefined, requestId), { status: 202, headers: { "x-request-id": requestId } });
   } catch (error) {
     if (error instanceof ApiError && error.code === "OTP_SEND_FAILED") {
       return NextResponse.json({ error: { code: error.code,

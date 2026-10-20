@@ -7,14 +7,15 @@ import { apiErrorResponse, parseJson } from "@/server/http";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { setSessionCookie } from "@/server/session-cookie";
 import { hashSecret, normalizeKenyanPhone } from "@/server/security";
+import { getClientIp } from "@/server/client-ip";
 
 export async function POST(request: NextRequest) {
   try {
-    const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+    const clientIp = getClientIp(request.headers);
     const input = await parseJson(request, verifyOtpSchema);
     const phone = normalizeKenyanPhone(input.phone);
     await Promise.all([
-      enforceRateLimit(`otp-verify-ip:${forwarded}`, 15, 600),
+      enforceRateLimit(`otp-verify-ip:${clientIp ?? "unknown"}`, 15, 600),
       enforceRateLimit(`otp-verify-phone:${hashSecret(phone)}`, 10, 600),
     ]);
     const user = await verifyOtp(input);
