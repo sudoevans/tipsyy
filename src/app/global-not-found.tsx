@@ -15,9 +15,8 @@ export default function GlobalNotFound() {
           <p className="text-sm font-semibold text-tipsy-amber-700">404</p>
           <h1 className="mt-3 text-2xl font-semibold tracking-tight">We couldn’t find that page</h1>
           <p className="mt-3 text-sm leading-6 text-tipsy-muted">The page may have moved, or the address may be incomplete.</p>
-          <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+          <div className="mt-6 flex justify-center">
             <Link className="inline-flex h-11 items-center justify-center rounded-xl bg-tipsy-amber-500 px-5 text-sm font-semibold transition hover:bg-tipsy-amber-300" href="/">Go to store</Link>
-            <Link className="inline-flex h-11 items-center justify-center rounded-xl border border-tipsy-line px-5 text-sm font-semibold transition hover:bg-tipsy-surface" href="https://admin.tipsytheoryy.com/admin">Open operations</Link>
           </div>
         </section>
       </main>
