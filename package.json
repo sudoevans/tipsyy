@@ -4,12 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/patch-opennext-cloudflare.mjs",
+    "prebuild": "npm run cf-typegen && node scripts/patch-opennext-cloudflare.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/delivery-distance.test.mts tests/payment-receipt-match.test.mts tests/payment-retry-policy.test.mts tests/payment-reservation-policy.test.mts tests/blessedtexts-response.test.mts tests/otp-sms-claim.test.mts tests/client-ip.test.mts",
+    "typecheck": "npm run cf-typegen && tsc --noEmit",
+    "test:realtime": "vitest run",
+    "test": "npm run test:unit && npm run test:realtime",
+    "test:unit": "node --experimental-strip-types --test tests/delivery-distance.test.mts tests/payment-receipt-match.test.mts tests/payment-retry-policy.test.mts tests/payment-reservation-policy.test.mts tests/blessedtexts-response.test.mts tests/otp-sms-claim.test.mts tests/client-ip.test.mts",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:seed": "node scripts/db-seed.mjs",
     "db:setup": "npm run db:migrate && npm run db:seed",
@@ -55,6 +57,8 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.5",
+    "@electric-sql/pglite": "^0.5.12",
     "@svgr/webpack": "^8.1.0",
     "@tailwindcss/forms": "^0.5.11",
     "@types/node": "^20.19.25",
@@ -67,6 +71,7 @@
     "prettier-plugin-tailwindcss": "^0.8.1",
     "tailwindcss": "^4.1.17",
     "typescript": "^5.9.3",
+    "vitest": "^4.1.12",
     "wrangler": "^4.149.0"
   },
   "overrides": {
