@@ -69,6 +69,7 @@ interface OrderSnapshot {
     promptSent: boolean;
     receipt: string | null;
     paidAt: string | null;
+    retryAllowed: boolean;
   };
   totals: {
     subtotal: number;
@@ -111,7 +112,31 @@ function cartMatchesCheckoutSession(
 }
 
 const CHECKOUT_SESSION_KEY = "tipsy-theoryy-active-order";
+const CHECKOUT_REQUEST_KEY = "tipsy-theoryy-checkout-request";
 const STOCK_ISSUE_STORAGE_KEY = "tipsy-theoryy-stock-issue";
+const CHECKOUT_REQUEST_TIMEOUT_MS = 25_000;
+
+async function idempotentCheckoutRequest(body: unknown) {
+  const bytes = new TextEncoder().encode(JSON.stringify(body));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(CHECKOUT_REQUEST_KEY) ?? "null") as { fingerprint?: string; token?: string; paymentIdempotencyKey?: string } | null;
+    if (saved?.fingerprint === fingerprint && saved.token) {
+      const paymentIdempotencyKey = saved.paymentIdempotencyKey ?? crypto.randomUUID();
+      if (!saved.paymentIdempotencyKey) window.localStorage.setItem(CHECKOUT_REQUEST_KEY, JSON.stringify({ ...saved, paymentIdempotencyKey }));
+      return { checkoutToken: saved.token, paymentIdempotencyKey };
+    }
+  } catch { /* Replace unreadable local data with a fresh token. */ }
+  const checkoutToken = crypto.randomUUID();
+  const paymentIdempotencyKey = crypto.randomUUID();
+  window.localStorage.setItem(CHECKOUT_REQUEST_KEY, JSON.stringify({ fingerprint, token: checkoutToken, paymentIdempotencyKey }));
+  return { checkoutToken, paymentIdempotencyKey };
+}
+
+function timedOutRequest(error: unknown) {
+  return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+}
 
 class CheckoutRequestError extends Error {
   constructor(
@@ -293,8 +318,11 @@ export default function CheckoutExperience() {
   const [mobileCheckoutView, setMobileCheckoutView] =
     useState<MobileCheckoutView>("summary");
   const [isAdvancingToPayment, setIsAdvancingToPayment] = useState(false);
+  const checkoutInFlight = useRef(false);
+  const [checkoutWarning, setCheckoutWarning] = useState<string | null>(null);
   const mobileDetailsFormRef = useRef<HTMLFormElement>(null);
   const [isSendingPayment, setIsSendingPayment] = useState(false);
+  const paymentRequestKey = useRef<string | null>(null);
   const [isCancellingPayment, setIsCancellingPayment] = useState(false);
   const [isPaymentStillWaiting, setIsPaymentStillWaiting] = useState(false);
   const [toast, setToast] = useState<CheckoutToast | null>(null);
@@ -349,6 +377,7 @@ export default function CheckoutExperience() {
             {
               headers: { Authorization: `Bearer ${session.accessToken}` },
               cache: "no-store",
+              signal: AbortSignal.timeout(15_000),
             },
           );
           const snapshot = await responseData<OrderSnapshot>(response);
@@ -369,6 +398,7 @@ export default function CheckoutExperience() {
             clearCartForCheckout();
             setCart({});
             window.localStorage.removeItem(CHECKOUT_SESSION_KEY);
+            window.localStorage.removeItem(CHECKOUT_REQUEST_KEY);
             return;
           }
           if (snapshot.status === "PENDING_PAYMENT" && reservationIsActive) {
@@ -387,7 +417,7 @@ export default function CheckoutExperience() {
           }
           window.localStorage.removeItem(CHECKOUT_SESSION_KEY);
         } catch {
-          window.localStorage.removeItem(CHECKOUT_SESSION_KEY);
+          // A temporary network failure must not erase a recoverable order.
         }
       })();
     });
@@ -473,13 +503,13 @@ export default function CheckoutExperience() {
       ? {
           title: "Payment cancelled",
           description:
-            "You cancelled the M-Pesa prompt. Nothing has been charged.",
+            "This payment was cancelled. If you received an M-Pesa receipt, share it below before trying again.",
         }
       : paymentFailure === "expired_before_prompt"
         ? {
             title: "Checkout expired",
             description:
-              "Your stock hold expired before an M-Pesa prompt was sent. Nothing was charged. Start a new checkout.",
+              "Your order wasn't completed in time. Please review your cart and try again. If you received an M-Pesa message, check it before paying again.",
           }
         : paymentFailure === "reconciling"
           ? {
@@ -490,12 +520,12 @@ export default function CheckoutExperience() {
       : paymentFailure === "timed_out"
         ? {
             title: "Payment timed out",
-            description: "The M-Pesa prompt expired. Nothing has been charged.",
+            description: "We couldn't confirm this payment. If you paid, don't try again—share your M-Pesa receipt below so we can check it.",
           }
         : {
             title: "Payment unsuccessful",
             description:
-              "Your M-Pesa payment was declined or could not be completed. Nothing has been charged.",
+              "This payment wasn't completed. If you received an M-Pesa receipt, share it below before trying again.",
           };
   const stepIndex =
     step === "details"
@@ -540,6 +570,7 @@ export default function CheckoutExperience() {
       });
       clearCartForCheckout();
       window.localStorage.removeItem(CHECKOUT_SESSION_KEY);
+      window.localStorage.removeItem(CHECKOUT_REQUEST_KEY);
       setCart({});
       setStep("complete");
       setToast({
@@ -621,14 +652,11 @@ export default function CheckoutExperience() {
             });
         const snapshot = await responseData<OrderSnapshot>(response);
         if (cancelled || applySnapshot(snapshot)) return;
-      } catch (error) {
+      } catch {
         if (!cancelled)
           setToast({
-            title: "Payment confirmation unavailable",
-            description:
-              error instanceof Error
-                ? error.message
-                : "If you paid, enter your M-Pesa receipt or contact support. Don’t pay again.",
+            title: "Still checking your payment",
+            description: "We couldn't get an update just now. If you paid, don't pay again—enter your M-Pesa receipt or contact support.",
           });
       }
       if (!cancelled && queryProvider) setIsPaymentStillWaiting(true);
@@ -675,26 +703,31 @@ export default function CheckoutExperience() {
     window.localStorage.setItem(CHECKOUT_SESSION_KEY, JSON.stringify(session));
   };
 
-  const requestPayment = async () => {
-    if (!checkoutSession || isSendingPayment) return;
+  const requestPayment = async (
+    session = checkoutSession,
+    alreadySending = false,
+  ) => {
+    if (!session || (isSendingPayment && !alreadySending)) return;
     setIsIssueOpen(false);
     setConfirmationCode("");
     setConfirmationCodeError("");
-    setIsSendingPayment(true);
+    if (!alreadySending) setIsSendingPayment(true);
+    paymentRequestKey.current ??= crypto.randomUUID();
     try {
       await responseData(
         await fetch("/api/v1/payments/mpesa/initiate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            orderNumber: checkoutSession.orderNumber,
-            accessToken: checkoutSession.accessToken,
-            idempotencyKey: crypto.randomUUID(),
+            orderNumber: session.orderNumber,
+            accessToken: session.accessToken,
+            idempotencyKey: paymentRequestKey.current,
           }),
+          signal: AbortSignal.timeout(CHECKOUT_REQUEST_TIMEOUT_MS),
         }),
       );
       persistCheckoutSession({
-        ...checkoutSession,
+        ...session,
         paymentInitiated: true,
         paymentInitiatedAt: new Date().toISOString(),
       });
@@ -705,10 +738,55 @@ export default function CheckoutExperience() {
         description: "Check your phone and approve the prompt. We’ll update this page as soon as Safaricom confirms your action.",
       });
     } catch (error) {
+      if (error instanceof CheckoutRequestError && error.code === "PAYMENT_ALREADY_COMPLETE") {
+        persistCheckoutSession({ ...session, paymentInitiated: true, paymentInitiatedAt: new Date().toISOString() });
+        setStep("waiting");
+        try {
+          const snapshot = await responseData<OrderSnapshot>(await fetch(`/api/v1/orders/${encodeURIComponent(session.orderNumber)}`, {
+            headers: { Authorization: `Bearer ${session.accessToken}` }, cache: "no-store", signal: AbortSignal.timeout(15_000),
+          }));
+          applySnapshot(snapshot);
+        } catch { /* The waiting screen will check again. */ }
+        return;
+      }
+      if (error instanceof CheckoutRequestError && error.code === "PAYMENT_UNDER_REVIEW") {
+        setPaymentFailure("reconciling");
+        setStep("failed");
+        return;
+      }
+      const confirmedNotStarted = error instanceof CheckoutRequestError && [
+        "MPESA_AUTH_FAILED", "MPESA_REQUEST_REJECTED", "RESERVATION_EXPIRED",
+        "ORDER_NOT_PAYABLE", "VALIDATION_ERROR", "INSUFFICIENT_STOCK",
+        "CART_ITEM_UNAVAILABLE", "COUPON_UNAVAILABLE",
+      ].includes(error.code ?? "");
+      if (!confirmedNotStarted) {
+        // The server may have sent the prompt even though the response was lost.
+        // Never offer an immediate second M-Pesa request in this state.
+        persistCheckoutSession({
+          ...session,
+          paymentInitiated: true,
+          paymentInitiatedAt: new Date().toISOString(),
+        });
+        setStep("waiting");
+        setToast({
+          title: "Checking your payment request",
+          description: "We're checking whether M-Pesa received the request. Check your phone, and don't pay again yet.",
+        });
+        return;
+      }
+      paymentRequestKey.current = null;
+      if (error instanceof CheckoutRequestError && ["INSUFFICIENT_STOCK", "CART_ITEM_UNAVAILABLE", "COUPON_UNAVAILABLE"].includes(error.code ?? "")) {
+        setToast({ title: "Order needs another look", description: "An item or discount is no longer available. Please review your cart before paying." });
+        return;
+      }
+      if (error instanceof CheckoutRequestError && error.code === "RESERVATION_EXPIRED") {
+        setPaymentFailure("expired_before_prompt");
+        setStep("failed");
+        return;
+      }
       setToast({
-        title: "M-Pesa prompt not sent",
-        description:
-          error instanceof Error ? error.message : "Please try again.",
+        title: "Couldn't start M-Pesa payment",
+        description: "The payment request wasn't accepted. Please try again shortly. You won't be charged unless you approve an M-Pesa prompt.",
       });
     } finally {
       setIsSendingPayment(false);
@@ -736,15 +814,12 @@ export default function CheckoutExperience() {
       setStep("failed");
       setToast({
         title: "Payment cancelled",
-        description: "Your M-Pesa payment was cancelled and the stock has been released.",
+        description: "The payment request was cancelled and your stock hold was released. If you received an M-Pesa receipt, report it before trying again.",
       });
-    } catch (error) {
+    } catch {
       setToast({
         title: "Couldn’t cancel payment",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Please wait for the M-Pesa response.",
+        description: "We couldn't confirm the cancellation. Please wait for the M-Pesa result, and don't pay again if you were charged.",
       });
     } finally {
       setIsCancellingPayment(false);
@@ -778,7 +853,8 @@ export default function CheckoutExperience() {
   };
 
   const continueToPayment = async () => {
-    if (isAdvancingToPayment) return;
+    if (isAdvancingToPayment || checkoutInFlight.current) return;
+    setCheckoutWarning(null);
     if (!deliveryCoordinates || !deliveryLocation || !deliveryAddress) {
       setToast({
         title: "Add your current location",
@@ -786,6 +862,7 @@ export default function CheckoutExperience() {
       });
       return;
     }
+    checkoutInFlight.current = true;
     setIsAdvancingToPayment(true);
     try {
       saveDeliveryLocation({
@@ -795,31 +872,61 @@ export default function CheckoutExperience() {
         longitude: deliveryCoordinates.longitude,
         instructions: deliveryInstructions.trim(),
       });
-      const created = await responseData<CheckoutSession>(
+      const orderInput = {
+        items: items.map(({ product, quantity }) => ({ productSlug: product.id, quantity })),
+        customer,
+        delivery: {
+          area: deliveryLocation,
+          addressLine: deliveryAddress,
+          latitude: deliveryCoordinates.latitude,
+          longitude: deliveryCoordinates.longitude,
+          instructions: deliveryInstructions.trim() || undefined,
+        },
+        couponCode: readCouponCode() || undefined,
+      };
+      const { checkoutToken, paymentIdempotencyKey } = await idempotentCheckoutRequest(orderInput);
+      const createdResponse = await responseData<CheckoutSession & { payment?: { status: string } | null }>(
         await fetch("/api/v1/checkout/orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            items: items.map(({ product, quantity }) => ({
-              productSlug: product.id,
-              quantity,
-            })),
-            customer,
-            delivery: {
-              area: deliveryLocation,
-              addressLine: deliveryAddress,
-              latitude: deliveryCoordinates.latitude,
-              longitude: deliveryCoordinates.longitude,
-              instructions: deliveryInstructions.trim() || undefined,
-            },
-            couponCode: readCouponCode() || undefined,
-          }),
+          body: JSON.stringify({ ...orderInput, checkoutToken, paymentIdempotencyKey }),
+          signal: AbortSignal.timeout(CHECKOUT_REQUEST_TIMEOUT_MS),
         }),
       );
+      const { payment, ...created } = createdResponse;
+      paymentRequestKey.current = null;
       persistCheckoutSession({ ...created, paymentInitiated: false });
-      setStep("payment");
+      if ((created as CheckoutSession & { status?: string }).status !== "PENDING_PAYMENT") {
+        setStep("waiting");
+        try {
+          const snapshot = await responseData<OrderSnapshot>(await fetch(`/api/v1/orders/${encodeURIComponent(created.orderNumber)}`, {
+            headers: { Authorization: `Bearer ${created.accessToken}` }, cache: "no-store", signal: AbortSignal.timeout(15_000),
+          }));
+          applySnapshot(snapshot);
+        } catch {
+          setToast({ title: "Checking your order", description: "We found your earlier order and are checking its latest payment status. Please don't pay again yet." });
+        }
+        return;
+      }
+      if (payment?.status !== "PENDING") {
+        setStep("payment");
+        setToast({ title: "Checking your M-Pesa request", description: "We found your order but need to confirm whether M-Pesa received the prompt. Please don't pay again yet." });
+        return;
+      }
+      persistCheckoutSession({ ...created, paymentInitiated: true, paymentInitiatedAt: new Date().toISOString() });
+      setIsPaymentStillWaiting(false);
+      setStep("waiting");
       setMobileCheckoutView("details");
+      setToast({ title: "M-Pesa prompt sent", description: "Check your phone and approve the prompt. We’ll update this page as soon as Safaricom confirms your action." });
     } catch (error) {
+      if (timedOutRequest(error)) {
+        setCheckoutWarning("We couldn’t confirm whether your order was created. Please wait a minute before trying again, or contact support. No M-Pesa request was started from this screen.");
+        setToast({
+          title: "Order confirmation is taking longer",
+          description: "No M-Pesa request was started. Please wait before retrying.",
+        });
+        return;
+      }
       if (
         error instanceof CheckoutRequestError &&
         ["INSUFFICIENT_STOCK", "CART_ITEM_UNAVAILABLE"].includes(
@@ -831,25 +938,22 @@ export default function CheckoutExperience() {
         return;
       }
       setToast({
-        title: "Checkout needs attention",
+        title: "Couldn't confirm your order",
         description:
-          error instanceof CheckoutRequestError
-            ? `${error.message}${error.requestId ? ` Support reference: ${error.requestId}.` : ""}`
-            : error instanceof Error
-              ? error.message
-              : "Please review your details.",
+          error instanceof CheckoutRequestError && (error.code?.startsWith("COUPON_") || error.code === "DELIVERY_UNAVAILABLE")
+            ? error.message
+            : `Please check your details and try again.${error instanceof CheckoutRequestError && error.requestId ? ` If you contact support, share code ${error.requestId}.` : ""}`,
       });
     } finally {
+      checkoutInFlight.current = false;
       setIsAdvancingToPayment(false);
     }
   };
 
   const retryPayment = () => {
-    window.localStorage.removeItem(CHECKOUT_SESSION_KEY);
-    setCheckoutSession(null);
-    setOrderSnapshot(null);
-    setPaymentFailure(null);
-    void continueToPayment();
+    if (!checkoutSession || !orderSnapshot?.payment.retryAllowed || isSendingPayment) return;
+    paymentRequestKey.current = null;
+    void requestPayment();
   };
 
   const cancelCheckout = () => {
@@ -896,9 +1000,11 @@ export default function CheckoutExperience() {
       setConfirmationCode("");
     } catch (error) {
       setConfirmationCodeError(
-        error instanceof Error
-          ? error.message
-          : "We could not submit that payment report.",
+        error instanceof CheckoutRequestError && error.code === "VALIDATION_ERROR"
+          ? "Please check the M-Pesa receipt code and try again."
+          : error instanceof CheckoutRequestError && error.code === "PAYMENT_REVIEW_ALREADY_OPEN"
+            ? "We're already checking a payment report for this order. Please contact support if you need to add details."
+          : "We couldn't check that receipt just now. Please try again or contact support with your order number.",
       );
     } finally {
       setIsCheckingCode(false);
@@ -1285,7 +1391,7 @@ export default function CheckoutExperience() {
                 type="submit"
               >
                 {isAdvancingToPayment
-                  ? "Confirming order…"
+                  ? "Sending M-Pesa prompt…"
                   : "Continue to payment"}
               </button>
             </form>
@@ -1391,20 +1497,22 @@ export default function CheckoutExperience() {
               <p className="mt-3 text-[15px] leading-5 text-tipsy-muted">
                 {failedPaymentCopy.description}
               </p>
+              {paymentFailure !== "expired_before_prompt" && paymentFailure !== "reconciling" ? receiptForm() : null}
               <div className="mt-7 grid gap-3">
-                <button
+                {orderSnapshot?.payment.retryAllowed ? <button
                   className="h-13 w-full rounded-xl bg-tipsy-amber-500 text-[16px] font-semibold"
+                  disabled={isSendingPayment}
                   onClick={retryPayment}
                   type="button"
                 >
-                  Retry payment
-                </button>
+                  {isSendingPayment ? "Sending prompt…" : "Try M-Pesa again"}
+                </button> : null}
                 <button
                   className="h-11 text-[15px] font-semibold text-tipsy-muted underline decoration-tipsy-amber-500 decoration-2 underline-offset-4"
                   onClick={cancelCheckout}
                   type="button"
                 >
-                  Cancel
+                  Back to shop
                 </button>
               </div>
             </section>
@@ -1503,6 +1611,7 @@ export default function CheckoutExperience() {
       {step === "details" ? (
         <div className="fixed inset-x-0 bottom-0 z-[100] border-t border-[#e2ded6] bg-white/95 px-4 py-3 backdrop-blur-sm sm:hidden">
           <div className="mx-auto max-w-md">
+            {checkoutWarning ? <p className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900" role="alert">{checkoutWarning}</p> : null}
             <button
               aria-busy={isAdvancingToPayment}
               className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-tipsy-amber-500 px-3 text-[14px] font-semibold text-tipsy-ink transition hover:bg-tipsy-amber-300 disabled:cursor-wait disabled:opacity-75"
@@ -1517,7 +1626,7 @@ export default function CheckoutExperience() {
               {isAdvancingToPayment ? (
                 <>
                   <span className="size-4 animate-spin rounded-full border-2 border-tipsy-ink/25 border-t-tipsy-ink" />
-                  Confirming order…
+                  Sending M-Pesa prompt…
                 </>
               ) : mobileCheckoutView === "summary" ? (
                 "Continue to delivery"
@@ -1776,13 +1885,14 @@ export default function CheckoutExperience() {
                   </div>
                 </div>
                 <div className="mt-6">
+                  {checkoutWarning ? <p className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900" role="alert">{checkoutWarning}</p> : null}
                   <button
                     className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-tipsy-amber-500 px-5 text-[15px] font-semibold text-tipsy-ink transition hover:bg-tipsy-amber-300 disabled:cursor-wait disabled:opacity-75"
                     disabled={isAdvancingToPayment}
                     type="submit"
                   >
                     {isAdvancingToPayment ? (
-                      "Confirming order…"
+                      "Sending M-Pesa prompt…"
                     ) : (
                       <>
                         Continue to payment{" "}
@@ -1922,23 +2032,24 @@ export default function CheckoutExperience() {
                   {failedPaymentCopy.title}
                 </h1>
                 <p className="mx-auto mt-2 max-w-sm text-sm leading-5 text-tipsy-muted">
-                  {failedPaymentCopy.description} Your reserved stock has been
-                  released.
+                  {failedPaymentCopy.description}
                 </p>
+                {paymentFailure !== "expired_before_prompt" && paymentFailure !== "reconciling" ? receiptForm() : null}
                 <div className="mt-6 grid gap-3">
-                  <button
+                  {orderSnapshot?.payment.retryAllowed ? <button
                     className="h-12 w-full rounded-xl bg-tipsy-amber-500 px-5 text-sm font-bold text-tipsy-ink transition hover:bg-tipsy-amber-300"
+                    disabled={isSendingPayment}
                     onClick={retryPayment}
                     type="button"
                   >
-                    Retry payment
-                  </button>
+                    {isSendingPayment ? "Sending prompt…" : "Try M-Pesa again"}
+                  </button> : null}
                   <button
                     className="h-11 text-sm font-semibold text-tipsy-muted underline decoration-tipsy-amber-500 decoration-2 underline-offset-4 transition hover:text-tipsy-ink"
                     onClick={cancelCheckout}
                     type="button"
                   >
-                    Cancel
+                    Back to shop
                   </button>
                 </div>
               </section>

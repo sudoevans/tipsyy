@@ -8,6 +8,10 @@ interface TokenResponse {
   errorMessage?: string;
 }
 
+// Cache only the resolved token. A pending fetch cannot be shared across
+// Cloudflare Worker request contexts.
+let cachedMpesaToken: { value: string; expiresAt: number; environment: string } | null = null;
+
 export interface StkPushResponse {
   MerchantRequestID?: string;
   CheckoutRequestID?: string;
@@ -102,6 +106,9 @@ async function parseDarajaResponse<T>(response: Response): Promise<T> {
 
 export async function getMpesaAccessToken() {
   const config = requireMpesaConfig();
+  if (cachedMpesaToken?.environment === config.environment && cachedMpesaToken.expiresAt > Date.now()) {
+    return cachedMpesaToken.value;
+  }
   const credentials = Buffer.from(`${config.consumerKey}:${config.consumerSecret}`).toString("base64");
   const response = await fetch(`${apiBase(config.environment)}/oauth/v1/generate?grant_type=client_credentials`, {
     headers: { Authorization: `Basic ${credentials}` },
@@ -110,6 +117,14 @@ export async function getMpesaAccessToken() {
   });
   const payload = await parseDarajaResponse<TokenResponse>(response);
   if (!payload.access_token) throw new ApiError(502, "MPESA_AUTH_FAILED", "M-Pesa authentication did not return an access token.");
+  const lifetimeSeconds = Number(payload.expires_in);
+  if (Number.isFinite(lifetimeSeconds) && lifetimeSeconds > 120) {
+    cachedMpesaToken = {
+      value: payload.access_token,
+      expiresAt: Date.now() + (lifetimeSeconds - 60) * 1_000,
+      environment: config.environment,
+    };
+  }
   return payload.access_token;
 }
 

@@ -17,6 +17,8 @@ const checkoutItemSchema = z.object({
 });
 
 export const createOrderSchema = z.object({
+  checkoutToken: z.string().uuid().optional(),
+  paymentIdempotencyKey: z.string().uuid().optional(),
   items: z.array(checkoutItemSchema).min(1).max(100),
   customer: z.object({
     name: z.string().trim().min(2).max(100),
@@ -141,7 +143,7 @@ export async function releaseOrderReservations(
     `;
   }
   await releaseCouponForOrder(tx, orderId);
-  await evaluateInventoryNotifications(tx);
+  await evaluateInventoryNotifications(tx, reservations.map((reservation) => reservation.variant_id));
 }
 
 export async function convertOrderReservations(
@@ -354,7 +356,7 @@ export async function createCheckoutOrder(
   cartId?: string,
 ) {
   const phone = normalizeKenyanPhone(input.customer.phone);
-  const accessToken = createOpaqueToken();
+  const accessToken = input.checkoutToken ?? createOpaqueToken();
   const accessTokenHash = hashSecret(accessToken);
   const quantities = new Map<string, number>();
   for (const item of input.items)
@@ -364,6 +366,70 @@ export async function createCheckoutOrder(
     );
 
   return withTransaction(async (tx) => {
+    if (input.checkoutToken) {
+      // Serialize retries of the same browser request before the stock lock.
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${accessTokenHash})::bigint)`;
+      const [existing] = await tx<{
+        id: string; order_number: string; status: string; customer_phone: string;
+        delivery_address: { addressLine?: string; latitude?: number; longitude?: number; storeName?: string; distanceKm?: number };
+        coupon_code: string | null; subtotal_minor: number; discount_minor: number;
+        delivery_fee_minor: number; total_minor: number; reservation_expires_at: Date | null;
+        payment_id: string;
+      }[]>`
+        SELECT o.id, o.order_number, o.status::text, o.customer_phone, o.delivery_address,
+               o.coupon_code, o.subtotal_minor, o.discount_minor, o.delivery_fee_minor,
+               o.total_minor, o.reservation_expires_at, p.id AS payment_id
+        FROM orders o JOIN payments p ON p.order_id = o.id
+        WHERE o.access_token_hash = ${accessTokenHash}
+      `;
+      if (existing) {
+        const savedItems = await tx<{
+          product_slug: string | null; product_name: string; image_url: string | null;
+          size_label: string | null; quantity: number; unit_price_minor: number; line_total_minor: number;
+        }[]>`
+          SELECT p.slug AS product_slug, oi.product_name, oi.image_url, oi.size_label,
+                 oi.quantity, oi.unit_price_minor, oi.line_total_minor
+          FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id
+          WHERE oi.order_id = ${existing.id}
+        `;
+        if (
+          existing.customer_phone !== phone ||
+          existing.delivery_address?.addressLine !== input.delivery.addressLine ||
+          Number(existing.delivery_address?.latitude) !== input.delivery.latitude ||
+          Number(existing.delivery_address?.longitude) !== input.delivery.longitude ||
+          (existing.coupon_code ?? "").toUpperCase() !== (input.couponCode ?? "").toUpperCase() ||
+          savedItems.length !== quantities.size ||
+          savedItems.some((item) => !item.product_slug || quantities.get(item.product_slug) !== item.quantity)
+        ) {
+          throw new ApiError(409, "CHECKOUT_REQUEST_CONFLICT", "Your checkout details changed. Please review your cart before trying again.");
+        }
+        return {
+          orderId: existing.id,
+          orderNumber: existing.order_number,
+          paymentId: existing.payment_id,
+          accessToken,
+          status: existing.status,
+          currency: "KES",
+          subtotal: existing.subtotal_minor,
+          discount: existing.discount_minor,
+          deliveryFee: existing.delivery_fee_minor,
+          deliveryDistanceKm: existing.delivery_address.distanceKm ?? 0,
+          total: existing.total_minor,
+          reservationExpiresAt: existing.reservation_expires_at?.toISOString() ?? null,
+          delivery: {
+            area: existing.delivery_address.storeName ?? "Current location",
+            addressLine: existing.delivery_address.addressLine ?? input.delivery.addressLine,
+            estimatedMinMinutes: null,
+            estimatedMaxMinutes: null,
+          },
+          items: savedItems.map((item) => ({
+            productSlug: item.product_slug!, name: item.product_name, imageUrl: item.image_url,
+            size: item.size_label, quantity: item.quantity, unitPrice: item.unit_price_minor,
+            lineTotal: item.line_total_minor, availableAfterReservation: null,
+          })),
+        };
+      }
+    }
     const deliveryPrice = await calculateDeliveryPrice(
       tx,
       input.delivery.latitude,
@@ -416,7 +482,7 @@ export async function createCheckoutOrder(
       (sum, item) => sum + item.price_minor * item.quantity,
       0,
     );
-    const { coupon, discount } = await calculateCoupon(
+    const { discount } = await calculateCoupon(
       tx,
       input.couponCode,
       phone,
@@ -424,9 +490,6 @@ export async function createCheckoutOrder(
       subtotal,
     );
     const total = subtotal - discount + deliveryPrice.feeKsh;
-    const reservationExpiresAt = new Date(
-      Date.now() + RESERVATION_MINUTES * 60_000,
-    );
     const customerUserId = await ensureCheckoutCustomerAccount(
       tx,
       input.customer.name.trim(),
@@ -447,11 +510,11 @@ export async function createCheckoutOrder(
       INSERT INTO orders (
         access_token_hash, user_id, cart_id, fulfillment_store_id, delivery_distance_km, customer_name, customer_phone, delivery_address,
         delivery_instructions, subtotal_minor, discount_minor, delivery_fee_minor, total_minor,
-        coupon_code, reservation_expires_at
+        coupon_code
       ) VALUES (
         ${accessTokenHash}, ${customerUserId}, ${cartId ?? null}, ${deliveryPrice.store.id}, ${Math.round(deliveryPrice.distanceKm * 100) / 100}, ${input.customer.name.trim()}, ${phone}, ${tx.json(address)},
         ${input.delivery.instructions ?? null}, ${subtotal}, ${discount}, ${deliveryPrice.feeKsh}, ${total},
-        ${input.couponCode?.toUpperCase() ?? null}, ${reservationExpiresAt}
+        ${input.couponCode?.toUpperCase() ?? null}
       )
       RETURNING id, order_number, created_at
     `;
@@ -466,17 +529,7 @@ export async function createCheckoutOrder(
           ${item.size_label}, ${item.image_url}, ${item.quantity}, ${item.price_minor}, ${item.price_minor * item.quantity}
         )
       `;
-      await tx`
-        UPDATE inventory SET reserved_quantity = reserved_quantity + ${item.quantity}, updated_at = now()
-        WHERE variant_id = ${item.variant_id}
-      `;
-      await tx`
-        INSERT INTO inventory_reservations (order_id, variant_id, quantity, expires_at)
-        VALUES (${order.id}, ${item.variant_id}, ${item.quantity}, ${reservationExpiresAt})
-      `;
     }
-    await evaluateInventoryNotifications(tx);
-
     const [payment] = await tx<{ id: string }[]>`
       INSERT INTO payments (order_id, amount_minor, payer_phone)
       VALUES (${order.id}, ${total}, ${phone})
@@ -484,7 +537,7 @@ export async function createCheckoutOrder(
     `;
     await tx`
       INSERT INTO order_events (order_id, to_status, source, note, metadata)
-      VALUES (${order.id}, 'PENDING_PAYMENT'::order_status, 'checkout', 'Order created and stock reserved.', ${tx.json({ reservationExpiresAt })})
+      VALUES (${order.id}, 'PENDING_PAYMENT'::order_status, 'checkout', 'Order created. Stock will be held when the M-Pesa prompt is sent.', ${tx.json({})})
     `;
     await enqueueTelegramAlert(tx, {
       eventType: "ORDER_CREATED",
@@ -493,16 +546,6 @@ export async function createCheckoutOrder(
       title: `New order ${order.order_number}`,
       body: `New order ${order.order_number} for KSh ${total.toLocaleString("en-KE")} is awaiting payment.`,
     });
-    if (coupon) {
-      await tx`
-        UPDATE promotions SET usage_count = usage_count + 1, updated_at = now()
-        WHERE id = ${coupon.promotion_id}
-      `;
-      await tx`
-        INSERT INTO coupon_redemptions (coupon_id, customer_phone, order_id, discount_minor)
-        VALUES (${coupon.coupon_id}, ${phone}, ${order.id}, ${discount})
-      `;
-    }
     if (cartId)
       await tx`UPDATE carts SET status = 'CONVERTED', updated_at = now() WHERE id = ${cartId} AND status = 'ACTIVE'`;
 
@@ -518,7 +561,7 @@ export async function createCheckoutOrder(
       deliveryFee: deliveryPrice.feeKsh,
       deliveryDistanceKm: Math.round(deliveryPrice.distanceKm * 100) / 100,
       total,
-      reservationExpiresAt: reservationExpiresAt.toISOString(),
+      reservationExpiresAt: null,
       delivery: {
         area: deliveryPrice.store.name,
         addressLine: input.delivery.addressLine,
