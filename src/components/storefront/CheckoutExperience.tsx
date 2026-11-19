@@ -22,6 +22,7 @@ import { getCurrentDeliveryLocation } from "./deliveryLocation";
 import { formatPrice } from "./currency";
 import StoreIcon from "./StoreIcon";
 import useCatalogProducts from "./useCatalogProducts";
+import { subscribeToPaymentUpdates } from "@/lib/checkout-live";
 
 type CheckoutStep =
   "details" | "payment" | "waiting" | "failed" | "complete" | "tracking";
@@ -607,33 +608,7 @@ export default function CheckoutExperience() {
   useEffect(() => {
     if (step !== "waiting" || !checkoutSession) return;
     let cancelled = false;
-    const streamController = new AbortController();
-    const observeCallbacks = async () => {
-      try {
-        const response = await fetch("/api/v1/orders/" + encodeURIComponent(checkoutSession.orderNumber) + "/events", {
-          headers: { Authorization: "Bearer " + checkoutSession.accessToken },
-          cache: "no-store", signal: streamController.signal,
-        });
-        if (!response.ok || !response.body) return;
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        try {
-          while (!cancelled) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            let boundary: number;
-            while ((boundary = buffer.indexOf("\n\n")) >= 0) {
-              const event = buffer.slice(0, boundary);
-              buffer = buffer.slice(boundary + 2);
-              if (!event.startsWith("data: ")) continue;
-              if (!cancelled && applySnapshot(JSON.parse(event.slice(6)) as OrderSnapshot)) return;
-            }
-          }
-        } finally { await reader.cancel().catch(() => undefined); }
-      } catch { /* The single delayed status request remains the fallback. */ }
-    };
+    let stopLiveUpdates: (() => void) | undefined;
     const check = async (queryProvider = false) => {
       try {
         const checkKey = `tipsy:stk-checked:${checkoutSession.orderNumber}:${checkoutSession.paymentInitiatedAt}`;
@@ -668,14 +643,25 @@ export default function CheckoutExperience() {
       0,
       30_000 - (Date.now() - initiatedAt),
     );
-    void observeCallbacks();
+    stopLiveUpdates = subscribeToPaymentUpdates({
+      orderNumber: checkoutSession.orderNumber,
+      accessToken: checkoutSession.accessToken,
+      onUpdate: async () => {
+        const response = await fetch(`/api/v1/orders/${encodeURIComponent(checkoutSession.orderNumber)}`, {
+          headers: { Authorization: `Bearer ${checkoutSession.accessToken}` },
+          cache: "no-store", signal: AbortSignal.timeout(15_000),
+        });
+        const snapshot = await responseData<OrderSnapshot>(response);
+        if (!cancelled) applySnapshot(snapshot);
+      },
+    });
     const timeout = window.setTimeout(() => void check(true), remainingCallbackWait);
     const onVisible = () => { if (document.visibilityState === "visible") void check(); };
     window.addEventListener("focus", onVisible);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
-      streamController.abort();
+      stopLiveUpdates?.();
       if (timeout) window.clearTimeout(timeout);
       window.removeEventListener("focus", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
@@ -1990,7 +1976,7 @@ export default function CheckoutExperience() {
                 <p className="mx-auto mt-2 max-w-sm text-sm leading-5 text-tipsy-muted">
                   {isPaymentStillWaiting
                     ? "Payment is not confirmed yet. If you paid, verify your M-Pesa receipt below. Don’t pay again."
-                    : "Approve or cancel the M-Pesa request on your phone. We’ll check once after 30 seconds if confirmation hasn’t arrived."}
+                    : "Approve or cancel the M-Pesa request on your phone. This page updates automatically when we receive the result."}
                 </p>
                 {isIssueOpen || isPaymentStillWaiting ? (
                   receiptForm()
