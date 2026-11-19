@@ -21,6 +21,11 @@ import {
 } from "./mpesa";
 import { hashSecret, normalizeKenyanPhone } from "./security";
 import { receiptMatchesOrder } from "./payment-receipt-match";
+import { canRetryPayment } from "./payment-retry-policy";
+import {
+  needsPaymentStockHold,
+  releasesStockImmediatelyAfterPromptFailure,
+} from "./payment-reservation-policy";
 
 export const initiatePaymentSchema = z.object({
   orderNumber: z.string().min(4).max(40),
@@ -89,7 +94,7 @@ interface PaymentContext {
   customer_name: string;
   customer_phone: string;
   user_id: string | null;
-  reservation_expires_at: Date;
+  reservation_expires_at: Date | null;
 }
 
 interface CallbackAttempt {
@@ -119,6 +124,13 @@ function failureOrderStatus(resultCode: number) {
   return resultCode === 1032
     ? ("PAYMENT_CANCELLED" as const)
     : ("PAYMENT_FAILED" as const);
+}
+
+function customerPaymentFailureText(orderNumber: string, resultCode: number) {
+  const nextStep = "If M-Pesa charged you, do not pay again. Keep your receipt and contact support.";
+  if (resultCode === 1032) return `The M-Pesa request for ${orderNumber} was cancelled. ${nextStep}`;
+  if (resultCode === 1037) return `The M-Pesa request for ${orderNumber} expired without confirmation. ${nextStep}`;
+  return `The M-Pesa payment for ${orderNumber} was not completed. ${nextStep}`;
 }
 
 function parseMpesaDate(value: unknown): Date | null {
@@ -366,6 +378,83 @@ async function settleSuccessfulPayment(
   return { inventorySettled, nextOrderStatus };
 }
 
+async function restorePaymentReservation(tx: Transaction, payment: PaymentContext) {
+  const expiresAt = new Date(Date.now() + RESERVATION_MINUTES * 60_000);
+  const items = await tx<{
+    reservation_status: string | null; variant_id: string; quantity: number;
+    on_hand_quantity: number; reserved_quantity: number; storefront_enabled: boolean;
+    variant_active: boolean; product_active: boolean;
+  }[]>`
+    SELECT r.status::text AS reservation_status, oi.variant_id, oi.quantity,
+           i.on_hand_quantity, i.reserved_quantity, i.storefront_enabled,
+           pv.active AS variant_active, p.active AS product_active
+    FROM order_items oi
+    JOIN inventory i ON i.variant_id = oi.variant_id
+    JOIN product_variants pv ON pv.id = oi.variant_id
+    JOIN products p ON p.id = pv.product_id
+    LEFT JOIN inventory_reservations r ON r.order_id = oi.order_id AND r.variant_id = oi.variant_id
+    WHERE oi.order_id = ${payment.order_id}
+    ORDER BY oi.variant_id
+    FOR UPDATE OF i
+  `;
+  const [{ count }] = await tx<{ count: number }[]>`
+    SELECT count(*)::int AS count FROM order_items WHERE order_id = ${payment.order_id}
+  `;
+  if (!items.length || items.length !== count || items.some((item) => !item.product_active || !item.variant_active || !item.storefront_enabled)) {
+    throw new ApiError(409, "CART_ITEM_UNAVAILABLE", "An item in this order is no longer available.");
+  }
+  for (const item of items) {
+    if (item.reservation_status !== "ACTIVE" && item.on_hand_quantity - item.reserved_quantity < item.quantity) {
+      throw new ApiError(409, "INSUFFICIENT_STOCK", "An item in this order is out of stock. Please review your cart.");
+    }
+  }
+  for (const item of items) {
+    if (item.reservation_status !== "ACTIVE") {
+      await tx`
+        UPDATE inventory SET reserved_quantity = reserved_quantity + ${item.quantity}, updated_at = now()
+        WHERE variant_id = ${item.variant_id}
+      `;
+    }
+    await tx`
+      INSERT INTO inventory_reservations (order_id, variant_id, quantity, status, expires_at)
+      VALUES (${payment.order_id}, ${item.variant_id}, ${item.quantity}, 'ACTIVE', ${expiresAt})
+      ON CONFLICT (order_id, variant_id) DO UPDATE
+      SET quantity = EXCLUDED.quantity, status = 'ACTIVE', expires_at = EXCLUDED.expires_at,
+          released_at = NULL, converted_at = NULL
+    `;
+  }
+  const [couponOrder] = await tx<{ coupon_code: string | null; discount_minor: number; customer_phone: string }[]>`
+    SELECT coupon_code, discount_minor, customer_phone FROM orders WHERE id = ${payment.order_id}
+  `;
+  if (couponOrder?.coupon_code) {
+    const [existing] = await tx`SELECT id FROM coupon_redemptions WHERE order_id = ${payment.order_id} LIMIT 1`;
+    if (!existing) {
+      const [coupon] = await tx<{ id: string; promotion_id: string }[]>`
+        SELECT c.id, c.promotion_id FROM coupons c WHERE c.code = ${couponOrder.coupon_code} FOR UPDATE OF c
+      `;
+      if (!coupon) throw new ApiError(409, "COUPON_UNAVAILABLE", "The discount for this order is no longer available.");
+      await tx`UPDATE promotions SET usage_count = usage_count + 1, updated_at = now() WHERE id = ${coupon.promotion_id}`;
+      await tx`
+        INSERT INTO coupon_redemptions (coupon_id, customer_phone, order_id, discount_minor)
+        VALUES (${coupon.id}, ${couponOrder.customer_phone}, ${payment.order_id}, ${couponOrder.discount_minor})
+      `;
+    }
+  }
+  await tx`
+    UPDATE orders SET status = 'PENDING_PAYMENT', cancelled_at = NULL, reservation_expires_at = ${expiresAt}, updated_at = now()
+    WHERE id = ${payment.order_id}
+  `;
+  await tx`UPDATE payments SET status = 'PENDING', updated_at = now() WHERE id = ${payment.payment_id}`;
+  await tx`
+    INSERT INTO order_events (order_id, from_status, to_status, source, note)
+    VALUES (${payment.order_id}, ${payment.order_status}::order_status, 'PENDING_PAYMENT'::order_status,
+            'checkout-retry', 'Customer retried payment on the same order.')
+  `;
+  payment.order_status = "PENDING_PAYMENT";
+  payment.payment_status = "PENDING";
+  payment.reservation_expires_at = expiresAt;
+}
+
 export async function initiateOrderPayment(
   input: z.infer<typeof initiatePaymentSchema>,
 ) {
@@ -405,23 +494,6 @@ export async function initiateOrderPayment(
         "This payment is being reviewed. Check its status instead of starting another prompt.",
       );
     }
-    if (payment.order_status !== "PENDING_PAYMENT") {
-      throw new ApiError(
-        409,
-        "ORDER_NOT_PAYABLE",
-        "This order can no longer be paid.",
-      );
-    }
-    if (new Date(payment.reservation_expires_at).getTime() <= Date.now()) {
-      await releaseOrderReservations(tx, payment.order_id, "EXPIRED");
-      await tx`UPDATE orders SET status = 'PAYMENT_CANCELLED', cancelled_at = now(), updated_at = now() WHERE id = ${payment.order_id}`;
-      throw new ApiError(
-        409,
-        "RESERVATION_EXPIRED",
-        "Your stock reservation expired. Review your cart and try again.",
-      );
-    }
-
     const [existing] = await tx<
       {
         id: string;
@@ -440,15 +512,25 @@ export async function initiateOrderPayment(
       }
       return { payment, attempt: existing, existing: true };
     }
-    const [pending] = await tx<{ id: string }[]>`
-      SELECT id FROM payment_attempts WHERE payment_id = ${payment.payment_id} AND status = 'PENDING'
+    const [latest] = await tx<{ id: string; status: string; result_code: string | null }[]>`
+      SELECT id, status::text, result_code FROM payment_attempts
+      WHERE payment_id = ${payment.payment_id} ORDER BY initiated_at DESC, id DESC LIMIT 1
     `;
+    const [pending] = await tx`SELECT id FROM payment_attempts WHERE payment_id = ${payment.payment_id} AND status = 'PENDING' LIMIT 1`;
     if (pending)
       throw new ApiError(
         409,
         "PAYMENT_ALREADY_PENDING",
         "An M-Pesa prompt is already pending for this order.",
       );
+    if (!canRetryPayment(payment.order_status, payment.payment_status, latest
+      ? { status: latest.status, resultCode: latest.result_code }
+      : null)) {
+      throw new ApiError(409, "PAYMENT_RETRY_UNSAFE", "We are checking the previous M-Pesa request. Please do not pay again yet.");
+    }
+    if (needsPaymentStockHold(payment.order_status, payment.reservation_expires_at)) {
+      await restorePaymentReservation(tx, payment);
+    }
 
     const [attempt] = await tx<
       {
@@ -477,6 +559,9 @@ export async function initiateOrderPayment(
   });
 
   if (context.existing) {
+    if (context.attempt.status === "PENDING" && !context.attempt.checkout_request_id) {
+      throw new ApiError(409, "PAYMENT_ALREADY_PENDING", "We are still checking whether M-Pesa received this request.");
+    }
     return {
       status: context.attempt.status,
       checkoutRequestId: context.attempt.checkout_request_id,
@@ -510,9 +595,23 @@ export async function initiateOrderPayment(
   } catch (error) {
     await sql`
       UPDATE payment_attempts
-      SET status = 'FAILED', completed_at = now(), result_description = ${error instanceof Error ? error.message : "M-Pesa initiation failed"}
+      SET status = 'FAILED', completed_at = now(),
+          result_code = ${error instanceof ApiError && ["MPESA_AUTH_FAILED", "MPESA_REQUEST_REJECTED"].includes(error.code) ? error.code : null},
+          result_description = ${error instanceof Error ? error.message : "M-Pesa initiation failed"}
       WHERE id = ${context.attempt.id}
     `;
+    // These responses are definitive: Safaricom did not start a prompt, so
+    // there is no customer action left to protect stock for. Transport errors
+    // remain deliberately uncertain and keep the one-minute hold in place.
+    if (error instanceof ApiError && releasesStockImmediatelyAfterPromptFailure(error.code)) {
+      await withTransaction(async (tx) => {
+        await releaseOrderReservations(tx, context.payment.order_id, "RELEASED");
+        await tx`
+          UPDATE orders SET reservation_expires_at = NULL, updated_at = now()
+          WHERE id = ${context.payment.order_id} AND status = 'PENDING_PAYMENT'
+        `;
+      });
+    }
     throw error;
   }
 }
@@ -693,7 +792,7 @@ export async function checkPendingStkStatus(
     `;
     await tx`
       INSERT INTO notifications (user_id, order_id, channel, event_type, destination, subject, body)
-      VALUES (${current.user_id}, ${current.order_id}, 'SMS', 'PAYMENT_FAILED', ${current.customer_phone}, 'Payment not completed', ${resultDescription})
+      VALUES (${current.user_id}, ${current.order_id}, 'SMS', 'PAYMENT_FAILED', ${current.customer_phone}, 'Payment not completed', ${customerPaymentFailureText(current.order_number, resultCode)})
     `;
     return { status: resultStatus };
   });
@@ -1007,7 +1106,7 @@ export async function processMpesaCallback(payload: StkCallbackPayload) {
       `;
       await tx`
         INSERT INTO notifications (user_id, order_id, channel, event_type, destination, subject, body)
-        VALUES (${attempt.user_id}, ${attempt.order_id}, 'SMS', 'PAYMENT_FAILED', ${attempt.customer_phone}, 'Payment not completed', ${resultDescription})
+        VALUES (${attempt.user_id}, ${attempt.order_id}, 'SMS', 'PAYMENT_FAILED', ${attempt.customer_phone}, 'Payment not completed', ${customerPaymentFailureText(attempt.order_number, resultCode)})
       `;
     }
 
