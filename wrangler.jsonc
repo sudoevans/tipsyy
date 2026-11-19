@@ -4,6 +4,10 @@
   "main": "src/cloudflare-worker.ts",
   "compatibility_date": "2026-10-08",
   "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "ORDER_PAYMENT_UPDATES", "class_name": "OrderPaymentUpdates" }]
+  },
+  "migrations": [{ "tag": "payment-updates-v1", "new_sqlite_classes": ["OrderPaymentUpdates"] }],
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
