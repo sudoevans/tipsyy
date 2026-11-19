@@ -50,7 +50,9 @@ export async function resolveAdminNotification(
   `;
 }
 
-export async function evaluateInventoryNotifications(tx: Transaction | Database) {
+export async function evaluateInventoryNotifications(tx: Transaction | Database, variantIds?: string[]) {
+  if (variantIds?.length === 0) return;
+  const targetVariants = variantIds ? JSON.stringify(variantIds) : null;
   const current = await tx<
     { variant_id: string; product_name: string; size_label: string | null; available: number; threshold: number }[]
   >`
@@ -61,6 +63,7 @@ export async function evaluateInventoryNotifications(tx: Transaction | Database)
     JOIN product_variants pv ON pv.id = i.variant_id
     JOIN products p ON p.id = pv.product_id
     WHERE i.on_hand_quantity - i.reserved_quantity <= i.low_stock_threshold
+      AND (${targetVariants}::text IS NULL OR i.variant_id::text IN (SELECT jsonb_array_elements_text(${targetVariants}::text::jsonb)))
   `;
 
   const active = new Set<string>();
@@ -97,6 +100,7 @@ export async function evaluateInventoryNotifications(tx: Transaction | Database)
     WHERE entity_type = 'inventory_variant'
       AND event_type IN ('INVENTORY_LOW_STOCK', 'INVENTORY_OUT_OF_STOCK')
       AND resolved_at IS NULL
+      AND (${targetVariants}::text IS NULL OR entity_id::text IN (SELECT jsonb_array_elements_text(${targetVariants}::text::jsonb)))
   `;
   for (const notification of open) {
     if (!active.has(`${notification.event_type}:${notification.entity_id}`)) {

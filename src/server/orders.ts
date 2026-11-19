@@ -1,6 +1,7 @@
 import { sql, type Database } from "./db";
 import { ApiError } from "./http";
 import { hashSecret } from "./security";
+import { canRetryPayment } from "./payment-retry-policy";
 
 export async function getGuestOrder(orderNumber: string, accessToken: string, database: Database = sql) {
   const [order] = await database<{
@@ -26,12 +27,15 @@ export async function getGuestOrder(orderNumber: string, accessToken: string, da
     payment_prompt_sent: boolean;
     provider_receipt: string | null;
     payment_paid_at: Date | null;
+    latest_attempt_status: string | null;
+    latest_attempt_result_code: string | null;
   }[]>`
     SELECT o.id, o.order_number, o.status, o.customer_name, o.customer_phone, o.delivery_address,
            o.delivery_instructions, o.currency, o.subtotal_minor, o.discount_minor,
            o.delivery_fee_minor, o.total_minor, o.reservation_expires_at, o.paid_at,
            o.confirmed_at, o.created_at, da.estimated_min_minutes, da.estimated_max_minutes,
            p.status AS payment_status, p.provider_receipt, p.paid_at AS payment_paid_at,
+           latest.status AS latest_attempt_status, latest.result_code AS latest_attempt_result_code,
            EXISTS (
              SELECT 1 FROM payment_attempts pa
              WHERE pa.payment_id = p.id AND pa.checkout_request_id IS NOT NULL
@@ -41,6 +45,9 @@ export async function getGuestOrder(orderNumber: string, accessToken: string, da
     LEFT JOIN LATERAL (
       SELECT id, status, provider_receipt, paid_at FROM payments WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
     ) p ON true
+    LEFT JOIN LATERAL (
+      SELECT status::text, result_code FROM payment_attempts WHERE payment_id = p.id ORDER BY initiated_at DESC, id DESC LIMIT 1
+    ) latest ON true
     WHERE o.order_number = ${orderNumber} AND o.access_token_hash = ${hashSecret(accessToken)}
   `;
   if (!order) throw new ApiError(404, "ORDER_NOT_FOUND", "Order not found.");
@@ -77,6 +84,9 @@ export async function getGuestOrder(orderNumber: string, accessToken: string, da
       promptSent: order.payment_prompt_sent,
       receipt: order.provider_receipt,
       paidAt: order.payment_paid_at,
+      retryAllowed: canRetryPayment(order.status, order.payment_status, order.latest_attempt_status
+        ? { status: order.latest_attempt_status, resultCode: order.latest_attempt_result_code }
+        : null),
     },
     reservationExpiresAt: order.reservation_expires_at,
     createdAt: order.created_at,
